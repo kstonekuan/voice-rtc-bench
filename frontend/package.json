@@ -1,0 +1,39 @@
+{
+	"name": "frontend",
+	"private": true,
+	"version": "0.0.0",
+	"type": "module",
+	"scripts": {
+		"dev": "vite",
+		"dev:api": "tsx watch server/index.ts",
+		"dev:all": "concurrently \"pnpm dev\" \"pnpm dev:api\"",
+		"build": "tsc -b && vite build",
+		"build:api": "tsc -p tsconfig.server.json",
+		"preview": "vite preview",
+		"start:api": "node dist/server/index.js",
+		"typecheck": "tsc --noEmit",
+		"lint": "biome check --write .",
+		"check": "pnpm typecheck && pnpm lint"
+	},
+	"dependencies": {
+		"@aws-sdk/client-timestream-query": "^3.934.0",
+		"cors": "^2.8.5",
+		"dotenv": "^17.2.3",
+		"express": "^5.1.0",
+		"react": "^19.2.0",
+		"react-dom": "^19.2.0"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "^2.3.6",
+		"@types/cors": "^2.8.19",
+		"@types/express": "^5.0.5",
+		"@types/node": "^24.10.1",
+		"@types/react": "^19.2.6",
+		"@types/react-dom": "^19.2.3",
+		"@vitejs/plugin-react": "^5.1.1",
+		"concurrently": "^9.2.1",
+		"tsx": "^4.20.6",
+		"typescript": "~5.9.3",
+		"vite": "^7.2.2"
+	}
+}

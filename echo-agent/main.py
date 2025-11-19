@@ -10,8 +10,6 @@ The agent also exposes a FastAPI server for on-demand room creation.
 
 import asyncio
 import json
-import logging
-import os
 import sys
 import threading
 import time
@@ -19,19 +17,18 @@ from typing import Any
 
 import uvicorn
 from daily import CallClient, Daily, EventHandler
-from dotenv import load_dotenv
 from livekit import rtc
 from livekit.agents import AutoSubscribe, JobContext, WorkerOptions, cli
+from loguru import logger
+from shared.settings import EchoAgentSettings
+from shared.types import PongMessage
+from shared.utils import setup_logging
 
-# Load environment variables
-load_dotenv()
+# Load settings from environment
+settings = EchoAgentSettings()
 
 # Configure logging
-logging.basicConfig(
-    level=getattr(logging, os.getenv("LOG_LEVEL", "INFO")),
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-)
-logger = logging.getLogger(__name__)
+setup_logging(level=settings.log_level)
 
 # Global reference to active Daily handlers
 active_daily_handlers: dict[str, "DailyEchoHandler"] = {}
@@ -57,13 +54,14 @@ class MessageHandler:
         self.message_count += 1
         server_receive_time = time.time() * 1000  # Convert to milliseconds
 
-        return {
-            "type": "pong",
-            "client_timestamp": client_timestamp,
-            "server_receive_time": server_receive_time,
-            "server_send_time": time.time() * 1000,
-            "message_count": self.message_count,
-        }
+        # Use shared PongMessage type
+        pong = PongMessage(
+            client_timestamp=client_timestamp,
+            server_receive_time=server_receive_time,
+            server_send_time=time.time() * 1000,
+            message_count=self.message_count,
+        )
+        return pong.model_dump()
 
 
 class DailyEchoHandler(EventHandler):
@@ -75,6 +73,7 @@ class DailyEchoHandler(EventHandler):
         self.agent_name = agent_name
         self.client: CallClient | None = None
         self.is_joined = False
+        self.should_exit = False
         self.handler = MessageHandler("Daily")
 
     def on_joined(self, data: dict[str, Any] | None, error: str | None) -> None:
@@ -96,6 +95,18 @@ class DailyEchoHandler(EventHandler):
         """Called when a participant leaves."""
         participant_id = participant.get("id", "unknown")
         logger.info(f"[Daily] Participant left: {participant_id}")
+
+        # Check if any non-agent participants remain
+        if self.client:
+            participants = self.client.participants()
+            # Filter out the agent itself from the participant list
+            non_agent_participants = [
+                p for p_id, p in participants.items() if p.get("user_name") != self.agent_name
+            ]
+
+            if not non_agent_participants:
+                logger.info("[Daily] Last client disconnected. Exiting room.")
+                self.should_exit = True
 
     def on_app_message(self, message: Any, sender: str) -> None:
         """Handle incoming app-message event."""
@@ -171,9 +182,9 @@ class DailyEchoHandler(EventHandler):
 
             logger.info("✨ [Daily] Agent is ready")
 
-            # Run forever (until interrupted)
+            # Run until client disconnects or interrupted
             try:
-                while True:
+                while not self.should_exit:
                     await asyncio.sleep(1)
             finally:
                 # Clean up
@@ -197,6 +208,7 @@ class LiveKitEchoHandler:
         self.room: rtc.Room | None = None
         self.handler = MessageHandler("LiveKit")
         self.background_tasks: set[asyncio.Task] = set()
+        self.exit_event = asyncio.Event()
 
     async def handle_data_received(self, data_packet: rtc.DataPacket) -> None:
         """Handle incoming data channel messages."""
@@ -250,6 +262,11 @@ class LiveKitEchoHandler:
         def on_participant_disconnected(participant: rtc.RemoteParticipant):
             logger.info(f"[LiveKit] Participant disconnected: {participant.identity}")
 
+            # Check if any remote participants remain
+            if self.room and not self.room.remote_participants:
+                logger.info("[LiveKit] Last client disconnected. Exiting room.")
+                self.exit_event.set()
+
         # Wait for connection
         await ctx.connect(auto_subscribe=AutoSubscribe.SUBSCRIBE_NONE)
 
@@ -257,15 +274,16 @@ class LiveKitEchoHandler:
         logger.info("👂 [LiveKit] Listening for ping messages...")
         logger.info("✨ [LiveKit] Agent is ready")
 
-        # Keep agent alive
-        await asyncio.Future()  # Run forever
+        # Keep agent alive until exit event is set
+        await self.exit_event.wait()
+        logger.info(f"👋 [LiveKit] Agent stopped. Total messages: {self.handler.message_count}")
 
 
 async def livekit_request_fnc(ctx: JobContext) -> None:
     """Request function for LiveKit agent worker."""
     logger.info(f"[LiveKit] Received job request for room: {ctx.room.name}")
 
-    agent = LiveKitEchoHandler(agent_name=os.getenv("LIVEKIT_AGENT_NAME", "unified-livekit-echo"))
+    agent = LiveKitEchoHandler(agent_name=settings.livekit.livekit_agent_name)
 
     await agent.entrypoint(ctx)
 
@@ -285,7 +303,7 @@ async def run_daily_agent(room_url: str) -> None:
     """Run the Daily agent."""
     agent = DailyEchoHandler(
         room_url=room_url,
-        agent_name=os.getenv("DAILY_AGENT_NAME", "unified-daily-echo"),
+        agent_name=settings.daily.daily_agent_name,
     )
     await agent.run()
 
@@ -320,12 +338,26 @@ async def join_daily_room(room_url: str, room_id: str) -> None:
 
 async def main() -> None:
     """Main entry point - runs API server and LiveKit worker."""
-    # Validate configuration
-    daily_api_key = os.getenv("DAILY_API_KEY")
-    livekit_required = ["LIVEKIT_URL", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET"]
+    # Validate configuration - settings will raise validation error if required fields are missing
+    # For optional platform enablement, we'll try to access settings and catch validation errors
+    enable_daily = False
+    enable_livekit = False
 
-    enable_daily = daily_api_key is not None
-    enable_livekit = all(os.getenv(var) for var in livekit_required)
+    try:
+        # Try to access Daily settings
+        _ = settings.daily.daily_api_key
+        enable_daily = True
+    except Exception:
+        pass
+
+    try:
+        # Try to access LiveKit settings
+        _ = settings.livekit.livekit_url
+        _ = settings.livekit.livekit_api_key
+        _ = settings.livekit.livekit_api_secret
+        enable_livekit = True
+    except Exception:
+        pass
 
     if not enable_daily and not enable_livekit:
         logger.error("❌ No platform configured!")
@@ -339,14 +371,14 @@ async def main() -> None:
     logger.info("=" * 72)
     logger.info(f"Daily API:   {'✅ Enabled' if enable_daily else '❌ Disabled'}")
     logger.info(f"LiveKit:     {'✅ Enabled' if enable_livekit else '❌ Disabled'}")
-    logger.info(f"API Server:  {'✅ Running on port ' + os.getenv('API_PORT', '8080')}")
+    logger.info(f"API Server:  ✅ Running on port {settings.api_port}")
     logger.info("=" * 72)
 
     tasks = []
 
     # Start FastAPI server in background thread
-    api_port = int(os.getenv("API_PORT", "8080"))
-    api_host = os.getenv("API_HOST", "0.0.0.0")
+    api_port = settings.api_port
+    api_host = settings.api_host
 
     def run_api_server():
         """Run FastAPI server in background thread."""
@@ -356,7 +388,7 @@ async def main() -> None:
             app,
             host=api_host,
             port=api_port,
-            log_level=os.getenv("LOG_LEVEL", "info").lower(),
+            log_level=settings.log_level.lower(),
         )
 
     api_thread = threading.Thread(target=run_api_server, daemon=True)

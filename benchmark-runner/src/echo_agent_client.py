@@ -4,35 +4,9 @@ Client for echo agent API.
 Provides utilities for requesting room credentials from the echo agent.
 """
 
-import logging
-
 import httpx
-from pydantic import BaseModel
-
-logger = logging.getLogger(__name__)
-
-
-class DailyRoomInfo(BaseModel):
-    """Daily room information from echo agent."""
-
-    room_url: str
-    expires_at: float
-
-
-class LiveKitRoomInfo(BaseModel):
-    """LiveKit room information from echo agent."""
-
-    server_url: str
-    room_name: str
-    token: str
-    expires_at: float
-
-
-class RoomCredentials(BaseModel):
-    """Room credentials from echo agent /connect endpoint."""
-
-    daily: DailyRoomInfo
-    livekit: LiveKitRoomInfo
+from loguru import logger
+from shared.types import RoomCredentials
 
 
 class EchoAgentClient:

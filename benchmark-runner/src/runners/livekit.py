@@ -4,10 +4,10 @@ LiveKit platform benchmark runner.
 
 import asyncio
 import json
-import logging
 import time
 
 from livekit import rtc
+from loguru import logger
 
 from ..stats import calculate_statistics
 from ..types import (
@@ -18,8 +18,6 @@ from ..types import (
     PingMessage,
     PongMessage,
 )
-
-logger = logging.getLogger(__name__)
 
 
 class LiveKitBenchmarkRunner:

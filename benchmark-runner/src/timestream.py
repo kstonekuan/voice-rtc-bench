@@ -2,16 +2,14 @@
 Amazon Timestream integration for storing and querying benchmark results.
 """
 
-import logging
 from datetime import datetime
 from typing import Any
 
 import boto3
 from botocore.exceptions import ClientError
+from loguru import logger
 
 from .types import BenchmarkResult, BenchmarkStatistics
-
-logger = logging.getLogger(__name__)
 
 
 class TimestreamClient:
@@ -193,13 +191,15 @@ class TimestreamClient:
             for row in response.get("Rows", []):
                 data = row.get("Data", [])
                 if len(data) >= 4:
-                    results.append({
-                        "platform": data[0].get("ScalarValue"),
-                        "location_id": data[1].get("ScalarValue"),
-                        "measure_name": data[2].get("ScalarValue"),
-                        "value": float(data[3].get("ScalarValue", 0)),
-                        "time": data[4].get("ScalarValue") if len(data) > 4 else None,
-                    })
+                    results.append(
+                        {
+                            "platform": data[0].get("ScalarValue"),
+                            "location_id": data[1].get("ScalarValue"),
+                            "measure_name": data[2].get("ScalarValue"),
+                            "value": float(data[3].get("ScalarValue", 0)),
+                            "time": data[4].get("ScalarValue") if len(data) > 4 else None,
+                        }
+                    )
 
             logger.info(f"✅ Retrieved {len(results)} records from Timestream")
             return results

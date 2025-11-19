@@ -4,19 +4,22 @@ CLI interface for the benchmark runner.
 
 import asyncio
 import json
-import logging
 import sys
 from pathlib import Path
 
 import typer
 from rich.console import Console
-from rich.logging import RichHandler
+from shared.settings import BenchmarkRunnerSettings
+from shared.utils import setup_logging
 
 from .echo_agent_client import get_room_credentials
 from .runners import DailyBenchmarkRunner, LiveKitBenchmarkRunner
 from .stats import format_statistics
 from .timestream import TimestreamClient
 from .types import BenchmarkConfig
+
+# Load settings from environment
+settings = BenchmarkRunnerSettings()
 
 app = typer.Typer(
     name="benchmark-runner",
@@ -26,16 +29,10 @@ app = typer.Typer(
 console = Console()
 
 
-def setup_logging(verbose: bool = False) -> None:
+def configure_logging(verbose: bool = False) -> None:
     """Configure logging with rich handler."""
-    level = logging.DEBUG if verbose else logging.INFO
-
-    logging.basicConfig(
-        level=level,
-        format="%(message)s",
-        datefmt="[%X]",
-        handlers=[RichHandler(console=console, rich_tracebacks=True)],
-    )
+    level = "DEBUG" if verbose else settings.log_level
+    setup_logging(level=level, use_rich=True)
 
 
 def create_timestream_client(
@@ -67,7 +64,7 @@ def daily(
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable verbose logging"),
 ) -> None:
     """Run benchmark on Daily platform."""
-    setup_logging(verbose)
+    configure_logging(verbose)
 
     timestream = create_timestream_client(timestream_database, timestream_table, timestream_region)
 
@@ -130,7 +127,7 @@ def livekit(
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable verbose logging"),
 ) -> None:
     """Run benchmark on LiveKit platform."""
-    setup_logging(verbose)
+    configure_logging(verbose)
 
     timestream = create_timestream_client(timestream_database, timestream_table, timestream_region)
 
@@ -181,19 +178,19 @@ def livekit(
 @app.command()
 def both(
     echo_agent_url: str = typer.Option(
-        ...,
+        None,
         "--echo-agent-url",
         "-u",
-        help="Echo agent API URL (e.g., http://localhost:8080)",
+        help="Echo agent API URL (defaults to ECHO_AGENT_URL env var)",
     ),
-    iterations: int = typer.Option(100, "--iterations", "-n", help="Number of pings to send"),
-    timeout: int = typer.Option(5000, "--timeout", "-t", help="Timeout in milliseconds"),
-    cooldown: int = typer.Option(100, "--cooldown", "-c", help="Cooldown between pings (ms)"),
+    iterations: int = typer.Option(None, "--iterations", "-n", help="Number of pings to send"),
+    timeout: int = typer.Option(None, "--timeout", "-t", help="Timeout in milliseconds"),
+    cooldown: int = typer.Option(None, "--cooldown", "-c", help="Cooldown between pings (ms)"),
     location_id: str = typer.Option(None, "--location", "-l", help="Location identifier"),
     output: Path = typer.Option(None, "--output", "-o", help="Save results to JSON file"),
     timestream_database: str = typer.Option(None, "--ts-database", help="Timestream database"),
     timestream_table: str = typer.Option(None, "--ts-table", help="Timestream table"),
-    timestream_region: str = typer.Option("us-east-1", "--ts-region", help="Timestream region"),
+    timestream_region: str = typer.Option(None, "--ts-region", help="Timestream region"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable verbose logging"),
 ) -> None:
     """
@@ -202,7 +199,17 @@ def both(
     This command requests room credentials from the echo agent API and then
     runs benchmarks on both platforms simultaneously.
     """
-    setup_logging(verbose)
+    configure_logging(verbose)
+
+    # Use settings for defaults
+    echo_agent_url = echo_agent_url or settings.echo_agent_url
+    iterations = iterations or settings.iterations
+    timeout = timeout or settings.timeout_ms
+    cooldown = cooldown or settings.cooldown_ms
+    location_id = location_id or settings.location_id
+    timestream_database = timestream_database or settings.timestream.timestream_database
+    timestream_table = timestream_table or settings.timestream.timestream_table
+    timestream_region = timestream_region or settings.timestream.aws_region
 
     timestream = create_timestream_client(timestream_database, timestream_table, timestream_region)
 

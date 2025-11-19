@@ -4,11 +4,11 @@ Daily platform benchmark runner.
 
 import asyncio
 import json
-import logging
 import time
 from typing import Any
 
 from daily import CallClient, Daily, EventHandler
+from loguru import logger
 
 from ..stats import calculate_statistics
 from ..types import (
@@ -18,8 +18,6 @@ from ..types import (
     LatencyMeasurement,
     PingMessage,
 )
-
-logger = logging.getLogger(__name__)
 
 
 class DailyBenchmarkRunner(EventHandler):

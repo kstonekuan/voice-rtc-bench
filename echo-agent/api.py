@@ -6,25 +6,25 @@ for both Daily and LiveKit platforms.
 """
 
 import asyncio
-import logging
-import os
 import time
+from contextlib import asynccontextmanager
+from datetime import timedelta
 from typing import Any
 
 import aiohttp
 from fastapi import FastAPI, HTTPException
 from livekit import api
+from loguru import logger
 from pipecat.transports.daily.utils import (
     DailyRESTHelper,
     DailyRoomParams,
     DailyRoomProperties,
 )
-from pydantic import BaseModel
+from shared.settings import EchoAgentSettings
+from shared.types import DailyRoomInfo, LiveKitRoomInfo, RoomCredentials
 
-logger = logging.getLogger(__name__)
-
-# FastAPI app
-app = FastAPI(title="Echo Agent API", version="1.0.0")
+# Load settings from environment
+settings = EchoAgentSettings()
 
 # Room creation helpers
 daily_rest_helper: DailyRESTHelper | None = None
@@ -43,29 +43,6 @@ def set_daily_room_callback(callback):
     join_daily_room_callback = callback
 
 
-class DailyRoomInfo(BaseModel):
-    """Daily room information."""
-
-    room_url: str
-    expires_at: float
-
-
-class LiveKitRoomInfo(BaseModel):
-    """LiveKit room information."""
-
-    server_url: str
-    room_name: str
-    token: str
-    expires_at: float
-
-
-class ConnectResponse(BaseModel):
-    """Response from /connect endpoint."""
-
-    daily: DailyRoomInfo
-    livekit: LiveKitRoomInfo
-
-
 async def initialize_daily_helper() -> None:
     """Initialize Daily REST helper with aiohttp session."""
     global daily_rest_helper, aiohttp_session
@@ -73,13 +50,9 @@ async def initialize_daily_helper() -> None:
     if aiohttp_session is None:
         aiohttp_session = aiohttp.ClientSession()
 
-    daily_api_key = os.getenv("DAILY_API_KEY")
-    if not daily_api_key:
-        raise ValueError("DAILY_API_KEY environment variable is required")
-
     daily_rest_helper = DailyRESTHelper(
-        daily_api_key=daily_api_key,
-        daily_api_url=os.getenv("DAILY_API_URL", "https://api.daily.co/v1"),
+        daily_api_key=settings.daily.daily_api_key,
+        daily_api_url=settings.daily.daily_api_url,
         aiohttp_session=aiohttp_session,
     )
 
@@ -128,16 +101,11 @@ def create_livekit_token(room_name: str, expiry_seconds: int = 600) -> LiveKitRo
     Returns:
         LiveKitRoomInfo with server URL, room name, token, and expiration
     """
-    livekit_url = os.getenv("LIVEKIT_URL")
-    livekit_api_key = os.getenv("LIVEKIT_API_KEY")
-    livekit_api_secret = os.getenv("LIVEKIT_API_SECRET")
-
-    if not all([livekit_url, livekit_api_key, livekit_api_secret]):
-        raise ValueError("LIVEKIT_URL, LIVEKIT_API_KEY, and LIVEKIT_API_SECRET are required")
-
     expiry_time = time.time() + expiry_seconds
 
-    token_obj = api.AccessToken(livekit_api_key, livekit_api_secret)
+    token_obj = api.AccessToken(
+        settings.livekit.livekit_api_key, settings.livekit.livekit_api_secret
+    )
     token_obj.with_identity("benchmark-runner")
     token_obj.with_name("benchmark-runner")
     token_obj.with_grants(
@@ -146,32 +114,34 @@ def create_livekit_token(room_name: str, expiry_seconds: int = 600) -> LiveKitRo
             room=room_name,
         )
     )
-    token_obj.with_ttl(expiry_seconds)
+    token_obj.with_ttl(timedelta(seconds=expiry_seconds))
 
     token = token_obj.to_jwt()
     logger.info(f"✅ Generated LiveKit token for room: {room_name}")
 
     return LiveKitRoomInfo(
-        server_url=livekit_url,
+        server_url=settings.livekit.livekit_url,
         room_name=room_name,
         token=token,
         expires_at=expiry_time,
     )
 
 
-@app.on_event("startup")
-async def startup_event():
-    """Initialize resources on startup."""
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Manage application lifespan events."""
+    # Startup
     logger.info("🚀 Starting FastAPI server...")
     await initialize_daily_helper()
-
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    """Cleanup resources on shutdown."""
+    yield
+    # Shutdown
     logger.info("🛑 Shutting down FastAPI server...")
     if aiohttp_session:
         await aiohttp_session.close()
+
+
+# FastAPI app with lifespan
+app = FastAPI(title="Echo Agent API", version="1.0.0", lifespan=lifespan)
 
 
 @app.get("/health")
@@ -180,7 +150,7 @@ async def health():
     return {"status": "ok", "service": "echo-agent-api"}
 
 
-@app.post("/connect", response_model=ConnectResponse)
+@app.post("/connect", response_model=RoomCredentials)
 async def connect():
     """
     Create temporary rooms for both Daily and LiveKit.
@@ -189,7 +159,7 @@ async def connect():
     benchmark testing. Returns credentials for both platforms.
 
     Returns:
-        ConnectResponse with Daily room URL and LiveKit token
+        RoomCredentials with Daily room URL and LiveKit token
     """
     try:
         # Generate unique room identifier
@@ -221,7 +191,7 @@ async def connect():
         else:
             logger.warning("⚠️  No Daily room join callback set - agent will not join room")
 
-        return ConnectResponse(
+        return RoomCredentials(
             daily=daily_room,
             livekit=livekit_room,
         )

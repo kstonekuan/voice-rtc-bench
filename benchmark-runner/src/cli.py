@@ -12,6 +12,7 @@ import typer
 from rich.console import Console
 from rich.logging import RichHandler
 
+from .echo_agent_client import get_room_credentials
 from .runners import DailyBenchmarkRunner, LiveKitBenchmarkRunner
 from .stats import format_statistics
 from .timestream import TimestreamClient
@@ -179,9 +180,12 @@ def livekit(
 
 @app.command()
 def both(
-    daily_room_url: str = typer.Option(..., "--daily-room", help="Daily room URL"),
-    livekit_url: str = typer.Option(..., "--livekit-url", help="LiveKit server URL"),
-    livekit_token: str = typer.Option(..., "--livekit-token", help="LiveKit access token"),
+    echo_agent_url: str = typer.Option(
+        ...,
+        "--echo-agent-url",
+        "-u",
+        help="Echo agent API URL (e.g., http://localhost:8080)",
+    ),
     iterations: int = typer.Option(100, "--iterations", "-n", help="Number of pings to send"),
     timeout: int = typer.Option(5000, "--timeout", "-t", help="Timeout in milliseconds"),
     cooldown: int = typer.Option(100, "--cooldown", "-c", help="Cooldown between pings (ms)"),
@@ -192,7 +196,12 @@ def both(
     timestream_region: str = typer.Option("us-east-1", "--ts-region", help="Timestream region"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable verbose logging"),
 ) -> None:
-    """Run benchmarks on both Daily and LiveKit platforms in parallel."""
+    """
+    Run benchmarks on both Daily and LiveKit platforms in parallel.
+
+    This command requests room credentials from the echo agent API and then
+    runs benchmarks on both platforms simultaneously.
+    """
     setup_logging(verbose)
 
     timestream = create_timestream_client(timestream_database, timestream_table, timestream_region)
@@ -205,17 +214,36 @@ def both(
     )
 
     async def run_both():
-        daily_runner = DailyBenchmarkRunner(daily_room_url)
-        livekit_runner = LiveKitBenchmarkRunner(livekit_url, livekit_token)
+        # Request room credentials from echo agent
+        console.print(f"🔗 Requesting room credentials from echo agent: {echo_agent_url}")
+        try:
+            credentials = await get_room_credentials(echo_agent_url)
+        except Exception as e:
+            console.print(f"❌ Failed to get room credentials: {e}")
+            raise
+
+        console.print("✅ Received credentials:")
+        console.print(f"   Daily room: {credentials.daily.room_url}")
+        console.print(f"   LiveKit room: {credentials.livekit.room_name}")
+        console.print()
+
+        # Create runners with credentials from API
+        daily_runner = DailyBenchmarkRunner(credentials.daily.room_url)
+        livekit_runner = LiveKitBenchmarkRunner(
+            credentials.livekit.server_url,
+            credentials.livekit.token,
+        )
 
         try:
             # Connect both
+            console.print("📞 Connecting to rooms...")
             await asyncio.gather(
                 daily_runner.connect(),
                 livekit_runner.connect(),
             )
 
             # Run benchmarks in parallel
+            console.print(f"🏁 Running benchmarks ({config.iterations} iterations)...")
             daily_result, livekit_result = await asyncio.gather(
                 daily_runner.run_benchmark(config),
                 livekit_runner.run_benchmark(config),

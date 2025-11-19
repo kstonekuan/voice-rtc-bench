@@ -19,8 +19,10 @@ This project measures the **network transport baseline latency** of Daily.co and
 
 ```
 voice-rtc-bench/
-├── agents/
-│   └── unified-echo/          # Python echo agent (Daily + LiveKit)
+├── echo-agent/                # Python echo agent (Daily + LiveKit)
+│   ├── main.py                # Agent + FastAPI server
+│   ├── api.py                 # Room creation endpoints
+│   └── pyproject.toml
 ├── benchmark-runner/          # Python CLI for running benchmarks
 │   └── src/
 │       ├── runners/           # Daily and LiveKit benchmark clients
@@ -37,37 +39,48 @@ voice-rtc-bench/
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│              Benchmark Runners (Python CLI)                  │
-│              Deployed to Multiple Locations                  │
+│       Benchmark Runners (Python CLI - Multi-Region)          │
 │                                                              │
 │  Location A (us-west-2)    Location B (eu-central-1)        │
 │  benchmark-runner CLI      benchmark-runner CLI             │
-│         ↓                          ↓                         │
-│    Daily + LiveKit            Daily + LiveKit               │
-│    WebRTC Connections         WebRTC Connections            │
-└──────────────────┬──────────────────┬─────────────────────────┘
-                   │                  │
-                   ▼                  ▼
-           ┌────────────────────────────────┐
-           │   Unified Echo Agent (Python)  │
-           │   Daily Handler + LiveKit      │
-           │   Worker running concurrently  │
-           └────────────────┬───────────────┘
-                            │
-                            ▼
-                   ┌─────────────────┐
-                   │  Amazon         │
-                   │  Timestream     │
-                   │  (Time-Series)  │
-                   └────────┬────────┘
-                            │
-                            ▼
+│         │                          │                         │
+│         └──────────┬───────────────┘                         │
+│                    │ 1. POST /connect                        │
+└────────────────────┼─────────────────────────────────────────┘
+                     ▼
+           ┌─────────────────────────────────┐
+           │ Unified Echo Agent (Cloud)      │
+           │ ─────────────────────────────── │
+           │ FastAPI Server (Port 8080)      │
+           │  • POST /connect                │
+           │  • Creates temporary rooms      │
+           │  • Returns credentials          │
+           │ ─────────────────────────────── │
+           │ Daily Handler (on-demand)       │
+           │ LiveKit Worker (dynamic)        │
+           └──────────┬──────────────────────┘
+                      │ 2. WebRTC Ping-Pong
+                      ▼
+           ┌──────────────────────────────────┐
+           │  WebRTC Rooms (Temporary)        │
+           │  • Daily: Auto-expires (10 min)  │
+           │  • LiveKit: Auto-cleanup         │
+           └──────────┬───────────────────────┘
+                      │ 3. Write results
+                      ▼
+           ┌─────────────────┐
+           │  Amazon         │
+           │  Timestream     │
+           │  (Time-Series)  │
+           └────────┬────────┘
+                    │ 4. Query metrics
+                    ▼
            ┌────────────────────────────────┐
            │  TypeScript API Server         │
            │  Express + AWS SDK             │
            │  /api/results/*                │
            └────────┬───────────────────────┘
-                    │
+                    │ 5. Visualize
                     ▼
            ┌────────────────┐
            │  React         │
@@ -78,11 +91,13 @@ voice-rtc-bench/
 
 ### How It Works
 
-1. **Unified Echo Agent** runs on a server, handling both Daily and LiveKit pings
-2. **Benchmark Runners** deployed to multiple locations send ping-pong messages
-3. **Results** are written to Amazon Timestream for time-series storage
-4. **API Server** queries Timestream and exposes aggregated metrics
-5. **Dashboard** visualizes data with filters for location, platform, and time range
+1. **Echo Agent** runs continuously in the cloud with FastAPI server on port 8080
+2. **Benchmark Runners** (scheduled or manual) call `POST /connect` API endpoint
+3. **Echo Agent** creates temporary rooms for both platforms and returns credentials
+4. **Benchmark Runners** connect to rooms and run ping-pong latency tests
+5. **Results** are written to Amazon Timestream for time-series storage
+6. **Rooms auto-expire** after 10 minutes (Daily) or when empty (LiveKit)
+7. **Dashboard** queries Timestream and visualizes metrics with filters
 
 ## Quick Start
 
@@ -98,14 +113,14 @@ voice-rtc-bench/
 
 **Daily.co:**
 1. Sign up at [daily.co](https://www.daily.co/)
-2. Create a room or use an existing one
-3. Get your room URL: `https://your-domain.daily.co/room-name`
+2. Go to [Developers](https://dashboard.daily.co/developers)
+3. Get your **API key** (for creating rooms programmatically)
 
 **LiveKit:**
 1. Sign up at [livekit.io](https://livekit.io/)
-2. Create a project
-3. Get your server URL: `wss://your-project.livekit.cloud`
-4. Generate API key and secret for agent access
+2. Create a project at [cloud.livekit.io](https://cloud.livekit.io)
+3. Get your **server URL**: `wss://your-project.livekit.cloud`
+4. Generate **API key** and **API secret** from project settings
 
 **AWS Timestream (Optional - for production):**
 1. Set up AWS account
@@ -114,71 +129,80 @@ voice-rtc-bench/
 4. Create table: `latency_measurements`
 5. Get AWS credentials (access key ID + secret)
 
-### Step 2: Start Unified Echo Agent
+### Step 2: Start Echo Agent
 
-The unified agent runs both Daily and LiveKit handlers in one process:
+The echo agent runs as a FastAPI server that creates rooms on-demand:
 
 ```bash
-cd agents/unified-echo
+cd echo-agent
 uv sync
 cp .env.example .env
-# Edit .env and configure platforms:
-# - DAILY_ROOM_URL (required for Daily)
-# - LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET (required for LiveKit)
+```
+
+Edit `.env` and configure:
+```bash
+# Daily API key for creating rooms
+DAILY_API_KEY=your-daily-api-key-here
+
+# LiveKit credentials
+LIVEKIT_URL=wss://your-project.livekit.cloud
+LIVEKIT_API_KEY=your-api-key
+LIVEKIT_API_SECRET=your-api-secret
+
+# API server configuration
+API_HOST=0.0.0.0
+API_PORT=8080
+```
+
+Start the agent:
+```bash
 uv run python main.py
 ```
 
 You should see:
 ```
-🎯 Unified Echo Agent
-==========================================
-Daily:   ✅ Enabled
-LiveKit: ✅ Enabled
-==========================================
+========================================================================
+🎯 Unified Echo Agent with On-Demand Room Creation
+========================================================================
+Daily API:   ✅ Enabled
+LiveKit:     ✅ Enabled
+API Server:  ✅ Running on port 8080
+========================================================================
+✅ API server started on http://0.0.0.0:8080
+📍 Endpoints: POST /connect, GET /health, GET /rooms
 ```
 
 ### Step 3: Run Benchmarks
 
-Use the Python CLI to run benchmarks from any location:
+The benchmark runner automatically requests room credentials from the echo agent:
 
 ```bash
 cd benchmark-runner
 uv sync
 
-# Run Daily benchmark only
-uv run python main.py daily \
-  --room-url "https://your-domain.daily.co/room" \
-  --iterations 100 \
-  --location "us-west-2"
-
-# Run LiveKit benchmark only
-uv run python main.py livekit \
-  --server-url "wss://your-project.livekit.cloud" \
-  --token "your-access-token" \
-  --iterations 100 \
-  --location "us-west-2"
-
-# Run both in parallel (recommended)
+# Run benchmarks on both platforms (recommended)
 uv run python main.py both \
-  --daily-room "https://your-domain.daily.co/room" \
-  --livekit-url "wss://your-project.livekit.cloud" \
-  --livekit-token "your-token" \
+  --echo-agent-url "http://localhost:8080" \
   --iterations 100 \
-  --location "us-west-2" \
-  --output results.json
+  --location "us-west-2"
 ```
 
 **With Timestream integration:**
 
 ```bash
 uv run python main.py both \
-  --daily-room "https://..." \
-  --livekit-url "wss://..." \
-  --livekit-token "..." \
+  --echo-agent-url "http://localhost:8080" \
   --location "us-west-2" \
   --ts-database "voice-rtc-benchmarks" \
   --ts-table "latency_measurements"
 ```
+
+The benchmark runner will:
+1. Request room credentials from the echo agent
+2. Connect to both Daily and LiveKit rooms
+3. Run ping-pong latency tests
+4. Write results to Timestream
+5. Rooms auto-expire after 10 minutes
 
 ### Step 4: View Results in Dashboard
 
@@ -213,9 +237,9 @@ Deploy to any Python hosting platform:
 
 **Fly.io:**
 ```bash
-cd agents/unified-echo
+cd echo-agent
 fly launch
-fly secrets set DAILY_ROOM_URL="..." LIVEKIT_URL="..." LIVEKIT_API_KEY="..." LIVEKIT_API_SECRET="..."
+fly secrets set DAILY_API_KEY="..." LIVEKIT_URL="..." LIVEKIT_API_KEY="..." LIVEKIT_API_SECRET="..."
 fly deploy
 ```
 
@@ -418,7 +442,7 @@ Get latest statistics for all locations and platforms.
 
 All projects use linting and type checking:
 
-**Python (unified-echo + benchmark-runner):**
+**Python (echo-agent + benchmark-runner):**
 ```bash
 uvx ruff check .          # Lint
 uvx ruff format .         # Format

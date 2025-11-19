@@ -4,6 +4,8 @@ Unified Echo Agent - Responds to ping messages for both Daily and LiveKit.
 
 This agent runs both Daily and LiveKit echo handlers concurrently,
 providing a single deployment for benchmarking both platforms.
+
+The agent also exposes a FastAPI server for on-demand room creation.
 """
 
 import asyncio
@@ -11,9 +13,11 @@ import json
 import logging
 import os
 import sys
+import threading
 import time
 from typing import Any
 
+import uvicorn
 from daily import CallClient, Daily, EventHandler
 from dotenv import load_dotenv
 from livekit import rtc
@@ -28,6 +32,9 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
+
+# Global reference to active Daily handlers
+active_daily_handlers: dict[str, "DailyEchoHandler"] = {}
 
 
 class MessageHandler:
@@ -283,50 +290,116 @@ async def run_daily_agent(room_url: str) -> None:
     await agent.run()
 
 
+async def join_daily_room(room_url: str, room_id: str) -> None:
+    """
+    Join a Daily room on-demand.
+
+    This is called when /connect API creates a new room.
+
+    Args:
+        room_url: Daily room URL to join
+        room_id: Unique identifier for this room session
+    """
+    logger.info(f"🎯 [Daily] Joining on-demand room: {room_id}")
+
+    agent = DailyEchoHandler(
+        room_url=room_url,
+        agent_name=f"echo-{room_id}",
+    )
+
+    # Store reference
+    active_daily_handlers[room_id] = agent
+
+    try:
+        await agent.run()
+    finally:
+        # Clean up when agent exits
+        active_daily_handlers.pop(room_id, None)
+        logger.info(f"👋 [Daily] Left room: {room_id}")
+
+
 async def main() -> None:
-    """Main entry point - runs both agents concurrently."""
+    """Main entry point - runs API server and LiveKit worker."""
     # Validate configuration
-    daily_room_url = os.getenv("DAILY_ROOM_URL")
+    daily_api_key = os.getenv("DAILY_API_KEY")
     livekit_required = ["LIVEKIT_URL", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET"]
 
-    enable_daily = daily_room_url is not None
+    enable_daily = daily_api_key is not None
     enable_livekit = all(os.getenv(var) for var in livekit_required)
 
     if not enable_daily and not enable_livekit:
         logger.error("❌ No platform configured!")
         logger.info("Configure at least one platform:")
-        logger.info("  Daily: Set DAILY_ROOM_URL")
+        logger.info("  Daily: Set DAILY_API_KEY (for on-demand room creation)")
         logger.info("  LiveKit: Set LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET")
         sys.exit(1)
 
-    logger.info("=" * 60)
-    logger.info("🎯 Unified Echo Agent")
-    logger.info("=" * 60)
-    logger.info(f"Daily:   {'✅ Enabled' if enable_daily else '❌ Disabled'}")
-    logger.info(f"LiveKit: {'✅ Enabled' if enable_livekit else '❌ Disabled'}")
-    logger.info("=" * 60)
+    logger.info("=" * 72)
+    logger.info("🎯 Unified Echo Agent with On-Demand Room Creation")
+    logger.info("=" * 72)
+    logger.info(f"Daily API:   {'✅ Enabled' if enable_daily else '❌ Disabled'}")
+    logger.info(f"LiveKit:     {'✅ Enabled' if enable_livekit else '❌ Disabled'}")
+    logger.info(f"API Server:  {'✅ Running on port ' + os.getenv('API_PORT', '8080')}")
+    logger.info("=" * 72)
 
     tasks = []
 
-    # Start Daily agent if configured
-    if enable_daily:
-        assert daily_room_url is not None  # enable_daily is True only if daily_room_url is not None
-        tasks.append(asyncio.create_task(run_daily_agent(daily_room_url)))
+    # Start FastAPI server in background thread
+    api_port = int(os.getenv("API_PORT", "8080"))
+    api_host = os.getenv("API_HOST", "0.0.0.0")
 
-    # Start LiveKit agent if configured
+    def run_api_server():
+        """Run FastAPI server in background thread."""
+        from api import app
+
+        uvicorn.run(
+            app,
+            host=api_host,
+            port=api_port,
+            log_level=os.getenv("LOG_LEVEL", "info").lower(),
+        )
+
+    api_thread = threading.Thread(target=run_api_server, daemon=True)
+    api_thread.start()
+    logger.info(f"✅ API server started on http://{api_host}:{api_port}")
+    logger.info("📍 Endpoints: POST /connect, GET /health, GET /rooms")
+
+    # Set callback for Daily room joining
+    if enable_daily:
+        from api import set_daily_room_callback
+
+        set_daily_room_callback(join_daily_room)
+        logger.info("✅ Daily room join callback configured")
+
+    # Initialize Daily SDK
+    if enable_daily:
+        Daily.init()
+        logger.info("✅ Daily SDK initialized (on-demand room creation)")
+
+    # Start LiveKit worker if configured
     if enable_livekit:
         # LiveKit agent uses blocking CLI worker, so run in executor
         loop = asyncio.get_event_loop()
         tasks.append(loop.run_in_executor(None, run_livekit_worker))
+    else:
+        logger.warning("⚠️  LiveKit disabled - worker not started")
 
-    # Wait for all agents
-    try:
-        await asyncio.gather(*tasks)
-    except KeyboardInterrupt:
-        logger.info("\n🛑 Shutting down unified agent...")
-    except Exception as e:
-        logger.error(f"Fatal error: {e}", exc_info=True)
-        sys.exit(1)
+    # Keep main loop running
+    if tasks:
+        try:
+            await asyncio.gather(*tasks)
+        except KeyboardInterrupt:
+            logger.info("\n🛑 Shutting down unified agent...")
+        except Exception as e:
+            logger.error(f"Fatal error: {e}", exc_info=True)
+            sys.exit(1)
+    else:
+        # No background tasks, just keep API server running
+        logger.info("⏳ API server running. Press Ctrl+C to exit.")
+        try:
+            await asyncio.Future()  # Run forever
+        except KeyboardInterrupt:
+            logger.info("\n🛑 Shutting down unified agent...")
 
 
 if __name__ == "__main__":

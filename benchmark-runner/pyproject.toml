@@ -10,7 +10,9 @@ dependencies = [
     "python-dotenv>=1.2.1",
     "typer>=0.9.0",
     "rich>=13.0.0",
-    "boto3>=1.34.0",        # AWS SDK for Timestream
+    "boto3>=1.34.0", # AWS SDK for Timestream
+    "pipecat-ai>=0.0.95",
+    "httpx>=0.28.1",
 ]
 
 [project.scripts]

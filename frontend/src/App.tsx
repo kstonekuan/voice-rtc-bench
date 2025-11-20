@@ -1,6 +1,20 @@
 import { useEffect, useState } from "react";
 import "./App.css";
-import { type AggregatedMetric, apiClient } from "./lib/api-client";
+import {
+	CartesianGrid,
+	Legend,
+	Line,
+	LineChart,
+	ResponsiveContainer,
+	Tooltip,
+	XAxis,
+	YAxis,
+} from "recharts";
+import {
+	type AggregatedMetric,
+	apiClient,
+	type TimeSeriesDataPoint,
+} from "./lib/api-client";
 
 function App() {
 	// State
@@ -11,6 +25,9 @@ function App() {
 	>("all");
 	const [timeRange, setTimeRange] = useState<number>(24);
 	const [metrics, setMetrics] = useState<AggregatedMetric[]>([]);
+	const [timeSeriesData, setTimeSeriesData] = useState<TimeSeriesDataPoint[]>(
+		[],
+	);
 	const [loading, setLoading] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 	const [apiHealthy, setApiHealthy] = useState(false);
@@ -50,6 +67,27 @@ function App() {
 
 		if (apiHealthy) {
 			loadMetrics();
+		}
+	}, [selectedLocation, selectedPlatform, timeRange, apiHealthy]);
+
+	// Load time-series data when filters change
+	useEffect(() => {
+		const loadTimeSeries = async () => {
+			try {
+				const data = await apiClient.getTimeSeries({
+					metric: "mean_rtt",
+					platform: selectedPlatform === "all" ? undefined : selectedPlatform,
+					location: selectedLocation === "all" ? undefined : selectedLocation,
+					hours: timeRange,
+				});
+				setTimeSeriesData(data);
+			} catch (err) {
+				console.error("Failed to load time series data:", err);
+			}
+		};
+
+		if (apiHealthy) {
+			loadTimeSeries();
 		}
 	}, [selectedLocation, selectedPlatform, timeRange, apiHealthy]);
 
@@ -212,6 +250,14 @@ function App() {
 						<ComparisonSection
 							dailyGroups={dailyGroups}
 							livekitGroups={livekitGroups}
+						/>
+					)}
+
+					{/* Time Series Chart */}
+					{timeSeriesData.length > 0 && (
+						<TimeSeriesChart
+							data={timeSeriesData}
+							selectedPlatform={selectedPlatform}
 						/>
 					)}
 				</>
@@ -401,6 +447,104 @@ function ComparisonSection({
 						</div>
 					);
 				})}
+			</div>
+		</section>
+	);
+}
+
+// Time Series Chart Component
+function TimeSeriesChart({
+	data,
+	selectedPlatform,
+}: {
+	data: TimeSeriesDataPoint[];
+	selectedPlatform: "all" | "daily" | "livekit";
+}) {
+	// Transform data for recharts format using Map for O(n) complexity
+	// Previously used array.find() which was O(n²)
+	const dataMap = new Map<
+		string,
+		{ timestamp: string; daily?: number; livekit?: number }
+	>();
+
+	for (const point of data) {
+		const timestamp = new Date(point.timestamp).toLocaleString();
+
+		const existing = dataMap.get(timestamp);
+		if (existing) {
+			// Type-safe platform assignment
+			if (point.platform === "daily") {
+				existing.daily = point.value;
+			} else if (point.platform === "livekit") {
+				existing.livekit = point.value;
+			}
+		} else {
+			// Type-safe initial value creation
+			const newPoint: { timestamp: string; daily?: number; livekit?: number } =
+				{
+					timestamp,
+				};
+			if (point.platform === "daily") {
+				newPoint.daily = point.value;
+			} else if (point.platform === "livekit") {
+				newPoint.livekit = point.value;
+			}
+			dataMap.set(timestamp, newPoint);
+		}
+	}
+
+	// Convert Map to array and sort by timestamp
+	const chartData = Array.from(dataMap.values()).sort((a, b) => {
+		const dateA = new Date(a.timestamp);
+		const dateB = new Date(b.timestamp);
+		return dateA.getTime() - dateB.getTime();
+	});
+
+	return (
+		<section className="time-series-section">
+			<h2 className="time-series-title">Mean RTT Latency Over Time</h2>
+			<div className="chart-container">
+				<ResponsiveContainer width="100%" height={400}>
+					<LineChart data={chartData}>
+						<CartesianGrid strokeDasharray="3 3" />
+						<XAxis
+							dataKey="timestamp"
+							angle={-45}
+							textAnchor="end"
+							height={100}
+							tick={{ fontSize: 12 }}
+						/>
+						<YAxis
+							label={{
+								value: "Latency (ms)",
+								angle: -90,
+								position: "insideLeft",
+							}}
+						/>
+						<Tooltip />
+						<Legend />
+						{(selectedPlatform === "all" || selectedPlatform === "daily") && (
+							<Line
+								type="monotone"
+								dataKey="daily"
+								stroke="#8884d8"
+								name="Daily.co"
+								strokeWidth={2}
+								dot={{ r: 4 }}
+							/>
+						)}
+						{(selectedPlatform === "all" || selectedPlatform === "livekit") && (
+							<Line
+								type="monotone"
+								dataKey="livekit"
+								stroke="#82ca9d"
+								name="LiveKit"
+								strokeWidth={2}
+								dot={{ r: 4 }}
+							/>
+						)}
+					</LineChart>
+				</ResponsiveContainer>
 			</div>
 		</section>
 	);

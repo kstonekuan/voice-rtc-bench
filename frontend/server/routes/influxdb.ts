@@ -1,11 +1,47 @@
 /**
  * API routes for querying benchmark results from InfluxDB.
+ * Uses Zod validation to ensure type safety and prevent SQL injection.
  */
 
+import type { RequestHandler } from "express";
 import { Router } from "express";
+import { z } from "zod";
 import { InfluxDBClientWrapper } from "../influxdb-client.js";
+import {
+	AggregatedStatsParamsSchema,
+	TimeSeriesParamsSchema,
+} from "../validation.js";
 
 const router = Router();
+
+/**
+ * Async handler wrapper to eliminate repetitive try/catch blocks.
+ * Automatically catches errors and sends appropriate responses.
+ */
+function asyncHandler(handler: RequestHandler): RequestHandler {
+	return async (req, res, next) => {
+		try {
+			await handler(req, res, next);
+		} catch (error) {
+			console.error("Route handler error:", error);
+
+			// Handle Zod validation errors
+			if (error instanceof z.ZodError) {
+				res.status(400).json({
+					error: "Invalid request parameters",
+					details: error.errors,
+				});
+				return;
+			}
+
+			// Handle generic errors
+			res.status(500).json({
+				error: "Internal server error",
+				message: error instanceof Error ? error.message : "Unknown error",
+			});
+		}
+	};
+}
 
 // Initialize InfluxDB client
 const influxdb = new InfluxDBClientWrapper({
@@ -24,32 +60,24 @@ const influxdb = new InfluxDBClientWrapper({
  * - location: location ID (optional)
  * - hours: hours to look back (default: 24)
  */
-router.get("/aggregated", async (req, res) => {
-	try {
-		const platform = req.query.platform as string | undefined;
-		const location_id = req.query.location as string | undefined;
-		const hours_ago = req.query.hours
-			? Number.parseInt(req.query.hours as string, 10)
-			: 24;
-
-		const results = await influxdb.queryAggregatedStats({
-			platform,
-			location_id,
-			hours_ago,
+router.get(
+	"/aggregated",
+	asyncHandler(async (req, res) => {
+		// Validate query parameters with Zod
+		const params = AggregatedStatsParamsSchema.parse({
+			platform: req.query.platform,
+			location_id: req.query.location,
+			hours_ago: req.query.hours,
 		});
+
+		const results = await influxdb.queryAggregatedStats(params);
 
 		res.json({
 			data: results,
-			query: { platform, location_id, hours_ago },
+			query: params,
 		});
-	} catch (error) {
-		console.error("Error querying aggregated stats:", error);
-		res.status(500).json({
-			error: "Failed to query aggregated statistics",
-			message: error instanceof Error ? error.message : "Unknown error",
-		});
-	}
-});
+	}),
+);
 
 /**
  * GET /api/results/timeseries
@@ -61,79 +89,48 @@ router.get("/aggregated", async (req, res) => {
  * - location: location ID (optional)
  * - hours: hours to look back (default: 24)
  */
-router.get("/timeseries", async (req, res) => {
-	try {
-		const metric_name = req.query.metric as string;
-
-		if (!metric_name) {
-			res.status(400).json({ error: "metric query parameter is required" });
-			return;
-		}
-
-		const platform = req.query.platform as string | undefined;
-		const location_id = req.query.location as string | undefined;
-		const hours_ago = req.query.hours
-			? Number.parseInt(req.query.hours as string, 10)
-			: 24;
-
-		const results = await influxdb.queryTimeSeries({
-			metric_name,
-			platform,
-			location_id,
-			hours_ago,
+router.get(
+	"/timeseries",
+	asyncHandler(async (req, res) => {
+		// Validate query parameters with Zod
+		const params = TimeSeriesParamsSchema.parse({
+			platform: req.query.platform,
+			location_id: req.query.location,
+			metric_name: req.query.metric,
+			hours_ago: req.query.hours,
 		});
+
+		const results = await influxdb.queryTimeSeries(params);
 
 		res.json({
 			data: results,
-			query: { metric_name, platform, location_id, hours_ago },
+			query: params,
 		});
-	} catch (error) {
-		console.error("Error querying time series:", error);
-		res.status(500).json({
-			error: "Failed to query time series data",
-			message: error instanceof Error ? error.message : "Unknown error",
-		});
-	}
-});
+	}),
+);
 
 /**
  * GET /api/results/locations
  * Get list of unique locations.
  */
-router.get("/locations", async (_req, res) => {
-	try {
+router.get(
+	"/locations",
+	asyncHandler(async (_req, res) => {
 		const locations = await influxdb.getLocations();
-
-		res.json({
-			data: locations,
-		});
-	} catch (error) {
-		console.error("Error querying locations:", error);
-		res.status(500).json({
-			error: "Failed to query locations",
-			message: error instanceof Error ? error.message : "Unknown error",
-		});
-	}
-});
+		res.json({ data: locations });
+	}),
+);
 
 /**
  * GET /api/results/latest
  * Get latest statistics for all locations and platforms.
  */
-router.get("/latest", async (_req, res) => {
-	try {
+router.get(
+	"/latest",
+	asyncHandler(async (_req, res) => {
 		const results = await influxdb.getLatestStats();
-
-		res.json({
-			data: results,
-		});
-	} catch (error) {
-		console.error("Error querying latest stats:", error);
-		res.status(500).json({
-			error: "Failed to query latest statistics",
-			message: error instanceof Error ? error.message : "Unknown error",
-		});
-	}
-});
+		res.json({ data: results });
+	}),
+);
 
 export { router as influxdbRouter };

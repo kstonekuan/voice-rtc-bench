@@ -55,11 +55,10 @@ class InfluxDBClientWrapper:
                 location_id=result.metadata.location_id or "unknown",
             )
 
-            # Write all points
-            for point in points:
-                self.client.write(point)
+            # Batch write all points in a single operation
+            self.client.write(points)
 
-            logger.info(f"✅ Wrote {len(points)} points to InfluxDB")
+            logger.info(f"✅ Wrote {len(points)} points to InfluxDB (batched)")
             return True
 
         except Exception as e:
@@ -83,120 +82,41 @@ class InfluxDBClientWrapper:
         Returns:
             List of InfluxDB Point objects
         """
-        # We'll create one point per metric to match the Timestream structure
-        # Measurement: latency_measurements
-        # Tags: platform, location_id
-        # Fields: individual metrics
-        points = []
+        # Define all metrics to be written as points
+        # Each metric maps to a field name and the corresponding attribute on stats
+        metric_definitions = [
+            # Message count metrics
+            ("total_messages", stats.total_messages),
+            ("successful_messages", stats.successful_messages),
+            ("failed_messages", stats.failed_messages),
+            # RTT metrics
+            ("mean_rtt", stats.mean_rtt),
+            ("median_rtt", stats.median_rtt),
+            ("min_rtt", stats.min_rtt),
+            ("max_rtt", stats.max_rtt),
+            ("std_dev_rtt", stats.std_dev_rtt),
+            # Percentiles
+            ("p50_rtt", stats.p50_rtt),
+            ("p95_rtt", stats.p95_rtt),
+            ("p99_rtt", stats.p99_rtt),
+            # Jitter and packet loss
+            ("jitter", stats.jitter),
+            ("packet_loss_rate", stats.packet_loss_rate),
+        ]
+
         timestamp = datetime.now()
+        points = []
 
-        # Message count metrics
-        points.append(
-            Point("latency_measurements")
-            .tag("platform", platform)
-            .tag("location_id", location_id)
-            .field("total_messages", stats.total_messages)
-            .time(timestamp)
-        )
-
-        points.append(
-            Point("latency_measurements")
-            .tag("platform", platform)
-            .tag("location_id", location_id)
-            .field("successful_messages", stats.successful_messages)
-            .time(timestamp)
-        )
-
-        points.append(
-            Point("latency_measurements")
-            .tag("platform", platform)
-            .tag("location_id", location_id)
-            .field("failed_messages", stats.failed_messages)
-            .time(timestamp)
-        )
-
-        # RTT metrics
-        points.append(
-            Point("latency_measurements")
-            .tag("platform", platform)
-            .tag("location_id", location_id)
-            .field("mean_rtt", stats.mean_rtt)
-            .time(timestamp)
-        )
-
-        points.append(
-            Point("latency_measurements")
-            .tag("platform", platform)
-            .tag("location_id", location_id)
-            .field("median_rtt", stats.median_rtt)
-            .time(timestamp)
-        )
-
-        points.append(
-            Point("latency_measurements")
-            .tag("platform", platform)
-            .tag("location_id", location_id)
-            .field("min_rtt", stats.min_rtt)
-            .time(timestamp)
-        )
-
-        points.append(
-            Point("latency_measurements")
-            .tag("platform", platform)
-            .tag("location_id", location_id)
-            .field("max_rtt", stats.max_rtt)
-            .time(timestamp)
-        )
-
-        points.append(
-            Point("latency_measurements")
-            .tag("platform", platform)
-            .tag("location_id", location_id)
-            .field("std_dev_rtt", stats.std_dev_rtt)
-            .time(timestamp)
-        )
-
-        # Percentiles
-        points.append(
-            Point("latency_measurements")
-            .tag("platform", platform)
-            .tag("location_id", location_id)
-            .field("p50_rtt", stats.p50_rtt)
-            .time(timestamp)
-        )
-
-        points.append(
-            Point("latency_measurements")
-            .tag("platform", platform)
-            .tag("location_id", location_id)
-            .field("p95_rtt", stats.p95_rtt)
-            .time(timestamp)
-        )
-
-        points.append(
-            Point("latency_measurements")
-            .tag("platform", platform)
-            .tag("location_id", location_id)
-            .field("p99_rtt", stats.p99_rtt)
-            .time(timestamp)
-        )
-
-        # Jitter and packet loss
-        points.append(
-            Point("latency_measurements")
-            .tag("platform", platform)
-            .tag("location_id", location_id)
-            .field("jitter", stats.jitter)
-            .time(timestamp)
-        )
-
-        points.append(
-            Point("latency_measurements")
-            .tag("platform", platform)
-            .tag("location_id", location_id)
-            .field("packet_loss_rate", stats.packet_loss_rate)
-            .time(timestamp)
-        )
+        # Create one point per metric
+        for field_name, field_value in metric_definitions:
+            point = (
+                Point("latency_measurements")
+                .tag("platform", platform)
+                .tag("location_id", location_id)
+                .field(field_name, field_value)
+                .time(timestamp)
+            )
+            points.append(point)
 
         return points
 

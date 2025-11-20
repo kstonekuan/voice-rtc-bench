@@ -62,18 +62,3 @@ def setup_logging(
             level=level.upper(),
             colorize=True,
         )
-
-
-def get_logger(name: str):
-    """
-    Get a logger instance.
-
-    With loguru, this returns the global logger instance with the name bound to it.
-
-    Args:
-        name: Logger name (typically __name__)
-
-    Returns:
-        Logger instance with name context
-    """
-    return logger.bind(name=name)

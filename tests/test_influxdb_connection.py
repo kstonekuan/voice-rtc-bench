@@ -13,7 +13,7 @@ sys.path.insert(0, str(workspace_root))
 from shared.settings import BenchmarkRunnerSettings  # noqa: E402
 
 
-def test_influxdb_connection():
+def test_influxdb_connection() -> bool:
     """Test InfluxDB connection and basic operations."""
     print("=" * 70)
     print("Testing InfluxDB Connection")

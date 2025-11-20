@@ -4,36 +4,24 @@ Daily platform benchmark runner.
 
 import asyncio
 import json
-import time
 from typing import Any
 
 from daily import CallClient, Daily, EventHandler
 from loguru import logger
 
-from ..stats import calculate_statistics
-from ..types import (
-    BenchmarkConfig,
-    BenchmarkMetadata,
-    BenchmarkResult,
-    LatencyMeasurement,
-    PingMessage,
-)
+from ..types import PingMessage
+from .base import BaseBenchmarkRunner
 
 
-class DailyBenchmarkRunner(EventHandler):
+class DailyBenchmarkRunner(EventHandler, BaseBenchmarkRunner):
     """Benchmark runner for Daily platform."""
 
     def __init__(self, room_url: str):
-        super().__init__()
+        EventHandler.__init__(self)
+        BaseBenchmarkRunner.__init__(self)
         self.room_url = room_url
         self.client: CallClient | None = None
         self.is_joined = False
-
-        # Benchmark state
-        self.measurements: list[LatencyMeasurement] = []
-        self.pending_pings: dict[float, float] = {}  # timestamp -> send_time
-        self.total_attempts = 0
-        self.benchmark_complete = asyncio.Event()
 
     def on_joined(self, data: dict[str, Any] | None, error: str | None) -> None:
         """Called when successfully joined the room."""
@@ -53,36 +41,8 @@ class DailyBenchmarkRunner(EventHandler):
             else:
                 data = message
 
-            message_type = data.get("type")
-
-            if message_type == "pong":
-                receive_time = time.perf_counter() * 1000  # Convert to ms
-                client_timestamp = data.get("client_timestamp")
-
-                # Find matching ping
-                send_time = self.pending_pings.pop(client_timestamp, None)
-
-                if send_time is not None:
-                    # Calculate latency metrics
-                    round_trip_time = receive_time - send_time
-                    server_receive_time = data.get("server_receive_time")
-                    server_send_time = data.get("server_send_time")
-
-                    client_to_server = server_receive_time - client_timestamp
-                    server_to_client = receive_time - server_send_time
-
-                    measurement = LatencyMeasurement(
-                        round_trip_time=round_trip_time,
-                        client_to_server=client_to_server,
-                        server_to_client=server_to_client,
-                        message_number=len(self.measurements) + 1,
-                        timestamp=receive_time,
-                    )
-
-                    self.measurements.append(measurement)
-                    logger.debug(
-                        f"📊 Measurement #{measurement.message_number}: RTT={round_trip_time:.2f}ms"
-                    )
+            # Delegate to base class handler
+            self.handle_pong_message(data)
 
         except json.JSONDecodeError as e:
             logger.error(f"Failed to parse pong message: {e}")
@@ -138,81 +98,15 @@ class DailyBenchmarkRunner(EventHandler):
             self.client.release()
         logger.info("👋 Disconnected from Daily room")
 
-    async def run_benchmark(self, config: BenchmarkConfig) -> BenchmarkResult:
-        """
-        Run the benchmark with the given configuration.
+    async def send_ping_message(self, ping_message: PingMessage) -> None:
+        """Send a ping message via Daily's app message channel."""
+        if self.client:
+            self.client.send_app_message(ping_message.model_dump())
 
-        Args:
-            config: Benchmark configuration
+    def get_platform_name(self) -> str:
+        """Return the platform name."""
+        return "daily"
 
-        Returns:
-            BenchmarkResult with measurements and statistics
-        """
-        start_time = time.time()
-        self.measurements = []
-        self.pending_pings = {}
-        self.total_attempts = 0
-
-        logger.info(f"🏁 Starting Daily benchmark: {config.iterations} iterations")
-
-        # Send pings
-        for i in range(config.iterations):
-            timestamp = time.perf_counter() * 1000  # Milliseconds
-            send_time = time.perf_counter() * 1000
-
-            ping_message = PingMessage(
-                type="ping",
-                timestamp=timestamp,
-            )
-
-            # Send ping
-            if self.client:
-                self.client.send_app_message(ping_message.model_dump())
-                self.pending_pings[timestamp] = send_time
-                self.total_attempts += 1
-
-                logger.debug(f"📤 Sent ping #{i + 1}/{config.iterations}")
-
-            # Wait cooldown period
-            await asyncio.sleep(config.cooldown_ms / 1000)
-
-        # Wait for remaining pongs with timeout
-        logger.info(f"⏳ Waiting for remaining pongs (timeout: {config.timeout_ms}ms)...")
-        wait_start = time.time()
-        while len(self.pending_pings) > 0:
-            elapsed_ms = (time.time() - wait_start) * 1000
-            if elapsed_ms > config.timeout_ms:
-                logger.warning(
-                    f"⚠️ Timeout reached. {len(self.pending_pings)} pings did not receive pongs"
-                )
-                break
-            await asyncio.sleep(0.01)
-
-        end_time = time.time()
-        duration_ms = (end_time - start_time) * 1000
-
-        logger.info(
-            f"✅ Benchmark complete: {len(self.measurements)}/{self.total_attempts} successful"
-        )
-
-        # Calculate statistics
-        statistics = calculate_statistics(self.measurements, self.total_attempts)
-
-        # Create metadata
-        metadata = BenchmarkMetadata(
-            start_time=start_time,
-            end_time=end_time,
-            duration_ms=duration_ms,
-            iterations=config.iterations,
-            timeout_ms=config.timeout_ms,
-            platform="daily",
-            room_url=self.room_url,
-            location_id=config.location_id,
-        )
-
-        return BenchmarkResult(
-            platform="daily",
-            measurements=self.measurements,
-            statistics=statistics,
-            metadata=metadata,
-        )
+    def get_room_url(self) -> str:
+        """Return the room URL."""
+        return self.room_url

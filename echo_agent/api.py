@@ -52,7 +52,6 @@ async def initialize_daily_helper() -> None:
 
     daily_rest_helper = DailyRESTHelper(
         daily_api_key=settings.daily.daily_api_key,
-        daily_api_url=settings.daily.daily_api_url,
         aiohttp_session=aiohttp_session,
     )
 

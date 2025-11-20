@@ -10,7 +10,9 @@ dependencies = [
     "pydantic-settings>=2.12.0",
     "typer>=0.20.0",
     "rich>=14.2.0",
-    "boto3>=1.41.0",             # AWS SDK for Timestream
+    "influxdb3-python>=0.16.0",  # InfluxDB 3 client
+    "pandas>=2.3.3",             # Required by influxdb3-python for data conversion
+    "pyarrow>=22.0.0",           # Required by influxdb3-python for Arrow format
     "pipecat-ai>=0.0.95",
     "httpx>=0.28.1",
     "shared",

@@ -1,11 +1,11 @@
 /**
- * API server for serving benchmark results from Amazon Timestream.
+ * API server for serving benchmark results from Amazon Timestream for InfluxDB.
  */
 
 import cors from "cors";
 import dotenv from "dotenv";
 import express from "express";
-import { timestreamRouter } from "./routes/timestream.js";
+import { influxdbRouter } from "./routes/influxdb.js";
 
 dotenv.config();
 
@@ -17,7 +17,7 @@ app.use(cors());
 app.use(express.json());
 
 // Routes
-app.use("/api/results", timestreamRouter);
+app.use("/api/results", influxdbRouter);
 
 // Health check
 app.get("/health", (_req, res) => {

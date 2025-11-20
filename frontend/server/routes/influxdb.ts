@@ -1,17 +1,18 @@
 /**
- * API routes for querying benchmark results from Timestream.
+ * API routes for querying benchmark results from InfluxDB.
  */
 
 import { Router } from "express";
-import { TimestreamClient } from "../timestream-client.js";
+import { InfluxDBClientWrapper } from "../influxdb-client.js";
 
 const router = Router();
 
-// Initialize Timestream client
-const timestream = new TimestreamClient({
-	region: process.env.AWS_REGION || "us-west-2",
-	database: process.env.TIMESTREAM_DATABASE || "voice-rtc-benchmarks",
-	table: process.env.TIMESTREAM_TABLE || "latency_measurements",
+// Initialize InfluxDB client
+const influxdb = new InfluxDBClientWrapper({
+	url: process.env.INFLUXDB_URL || "",
+	token: process.env.INFLUXDB_TOKEN || "",
+	org: process.env.INFLUXDB_ORG || "default",
+	database: process.env.INFLUXDB_DATABASE || "voice-rtc-benchmarks",
 });
 
 /**
@@ -31,7 +32,7 @@ router.get("/aggregated", async (req, res) => {
 			? Number.parseInt(req.query.hours as string, 10)
 			: 24;
 
-		const results = await timestream.queryAggregatedStats({
+		const results = await influxdb.queryAggregatedStats({
 			platform,
 			location_id,
 			hours_ago,
@@ -75,7 +76,7 @@ router.get("/timeseries", async (req, res) => {
 			? Number.parseInt(req.query.hours as string, 10)
 			: 24;
 
-		const results = await timestream.queryTimeSeries({
+		const results = await influxdb.queryTimeSeries({
 			metric_name,
 			platform,
 			location_id,
@@ -101,7 +102,7 @@ router.get("/timeseries", async (req, res) => {
  */
 router.get("/locations", async (_req, res) => {
 	try {
-		const locations = await timestream.getLocations();
+		const locations = await influxdb.getLocations();
 
 		res.json({
 			data: locations,
@@ -121,7 +122,7 @@ router.get("/locations", async (_req, res) => {
  */
 router.get("/latest", async (_req, res) => {
 	try {
-		const results = await timestream.getLatestStats();
+		const results = await influxdb.getLatestStats();
 
 		res.json({
 			data: results,
@@ -135,4 +136,4 @@ router.get("/latest", async (_req, res) => {
 	}
 });
 
-export { router as timestreamRouter };
+export { router as influxdbRouter };

@@ -283,7 +283,7 @@ async def livekit_request_fnc(ctx: JobContext) -> None:
     """Request function for LiveKit agent worker."""
     logger.info(f"[LiveKit] Received job request for room: {ctx.room.name}")
 
-    agent = LiveKitEchoHandler(agent_name=settings.livekit.livekit_agent_name)
+    agent = LiveKitEchoHandler()
 
     await agent.entrypoint(ctx)
 
@@ -301,10 +301,7 @@ def run_livekit_worker() -> None:
 
 async def run_daily_agent(room_url: str) -> None:
     """Run the Daily agent."""
-    agent = DailyEchoHandler(
-        room_url=room_url,
-        agent_name=settings.daily.daily_agent_name,
-    )
+    agent = DailyEchoHandler(room_url=room_url)
     await agent.run()
 
 

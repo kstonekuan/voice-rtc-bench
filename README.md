@@ -4,12 +4,12 @@ A distributed benchmarking system for comparing WebRTC voice AI platforms (Daily
 
 ## Overview
 
-This project measures the **network transport baseline latency** of Daily.co and LiveKit by sending ping-pong messages through WebRTC data channels. Results are aggregated in Amazon Timestream and visualized in a real-time dashboard.
+This project measures the **network transport baseline latency** of Daily.co and LiveKit by sending ping-pong messages through WebRTC data channels. Results are aggregated in Amazon Timestream for InfluxDB and visualized in a real-time dashboard.
 
 ### What You Get
 
 - 🌍 **Distributed Benchmarking**: Deploy runners to multiple locations
-- 📊 **Time-Series Data**: Historical metrics stored in Amazon Timestream
+- 📊 **Time-Series Data**: Historical metrics stored in Amazon Timestream for InfluxDB
 - 📈 **Aggregated Analytics**: Mean, P50, P95, P99, jitter, packet loss over time
 - 🎯 **Platform Comparison**: Side-by-side Daily vs LiveKit analysis
 - 🎨 **Real-time Dashboard**: Brutalist technical aesthetic with live data
@@ -26,11 +26,11 @@ voice-rtc-bench/
 ├── benchmark-runner/          # Python CLI for running benchmarks
 │   └── src/
 │       ├── runners/           # Daily and LiveKit benchmark clients
-│       ├── timestream.py      # AWS Timestream integration
+│       ├── influxdb.py        # InfluxDB 3 integration
 │       └── cli.py             # CLI interface
 └── frontend/                  # React dashboard + TypeScript API
     ├── src/                   # React app (data visualization)
-    └── server/                # Express API (Timestream queries)
+    └── server/                # Express API (InfluxDB queries)
 ```
 
 ## Architecture
@@ -72,8 +72,8 @@ voice-rtc-bench/
                       ▼
            ┌─────────────────┐
            │  Amazon         │
-           │  Timestream     │
-           │  (Time-Series)  │
+           │  Timestream for │
+           │  InfluxDB 3     │
            └────────┬────────┘
                     │ 4. Query metrics
                     ▼
@@ -97,10 +97,10 @@ voice-rtc-bench/
 2. **Benchmark Runners** (scheduled or manual) call `POST /connect` API endpoint
 3. **Echo Agent** creates temporary rooms for both platforms and returns credentials
 4. **Benchmark Runners** connect to rooms and run ping-pong latency tests
-5. **Results** are written to Amazon Timestream for time-series storage
+5. **Results** are written to Amazon Timestream for InfluxDB for time-series storage
 6. **Echo agents automatically leave** the room when the benchmark client disconnects
 7. **Rooms auto-expire** after 10 minutes (Daily) or when empty (LiveKit)
-8. **Dashboard** queries Timestream and visualizes metrics with filters
+8. **Dashboard** queries InfluxDB and visualizes metrics with filters
 
 ## Quick Start
 
@@ -110,7 +110,7 @@ voice-rtc-bench/
 - **Node.js 18+** with `pnpm` installed
 - **Daily account** (free tier works)
 - **LiveKit Cloud account** (free tier works)
-- **AWS account** with Timestream access (for production)
+- **AWS account** with Amazon Timestream for InfluxDB access (for production)
 
 ### Step 1: Set Up Platform Accounts
 
@@ -125,12 +125,12 @@ voice-rtc-bench/
 3. Get your **server URL**: `wss://your-project.livekit.cloud`
 4. Generate **API key** and **API secret** from project settings
 
-**AWS Timestream (Optional - for production):**
+**Amazon Timestream for InfluxDB (Optional - for production):**
 1. Set up AWS account
-2. Enable Timestream in your region
-3. Create database: `voice-rtc-benchmarks`
-4. Create table: `latency_measurements`
-5. Get AWS credentials (access key ID + secret)
+2. Create an Amazon Timestream for InfluxDB 3 instance in your region
+3. Get your InfluxDB endpoint URL from the AWS console
+4. Get your authentication token from AWS Secrets Manager
+5. Create database/bucket: `voice-rtc-benchmarks`
 
 ### Step 2: Start Echo Agent
 
@@ -190,21 +190,22 @@ uv run python main.py both \
   --location "us-west-2"
 ```
 
-**With Timestream integration:**
+**With InfluxDB integration:**
 
 ```bash
 uv run python main.py both \
   --echo-agent-url "http://localhost:8080" \
   --location "us-west-2" \
-  --ts-database "voice-rtc-benchmarks" \
-  --ts-table "latency_measurements"
+  --influxdb-url "https://your-instance.timestream-influxdb3.us-east-1.on.aws:8086" \
+  --influxdb-token "your-token" \
+  --influxdb-database "voice-rtc-benchmarks"
 ```
 
 The benchmark runner will:
 1. Request room credentials from the echo agent
 2. Connect to both Daily and LiveKit rooms
 3. Run ping-pong latency tests
-4. Write results to Timestream
+4. Write results to InfluxDB
 5. Echo agents automatically leave when the client disconnects
 6. Rooms auto-expire after 10 minutes
 
@@ -215,7 +216,7 @@ The benchmark runner will:
 cd frontend
 pnpm install
 cp .env.example .env
-# Edit .env and add AWS credentials + Timestream config
+# Edit .env and add InfluxDB credentials
 pnpm dev:api
 ```
 
@@ -295,11 +296,11 @@ pnpm build:api
 | Component        | Technology                                            |
 | ---------------- | ----------------------------------------------------- |
 | Echo Agent       | Python 3.11+ with `daily-python` and `livekit-agents` |
-| Benchmark Runner | Python with `typer`, `pydantic`, `boto3`              |
-| API Server       | TypeScript + Express + AWS SDK                        |
+| Benchmark Runner | Python with `typer`, `pydantic`, `influxdb3-python`   |
+| API Server       | TypeScript + Express + InfluxDB 3 Client              |
 | Frontend         | React 19 + TypeScript + Vite                          |
 | Styling          | Custom CSS with brutalist aesthetic                   |
-| Time-Series DB   | Amazon Timestream                                     |
+| Time-Series DB   | Amazon Timestream for InfluxDB 3                      |
 | Type Checking    | `ty` (Python), `tsc` (TypeScript)                     |
 | Linting          | `ruff` (Python), `biome` (TypeScript)                 |
 | Package Managers | `uv` (Python), `pnpm` (Node.js)                       |
@@ -345,9 +346,10 @@ uv run python main.py daily \
   --cooldown MS \            # Cooldown between pings (default: 100)
   --location ID \            # Location identifier (optional)
   --output FILE \            # Save JSON results (optional)
-  --ts-database NAME \       # Timestream database (optional)
-  --ts-table NAME \          # Timestream table (optional)
-  --ts-region REGION \       # AWS region (default: us-west-2)
+  --influxdb-url URL \       # InfluxDB endpoint URL (optional)
+  --influxdb-token TOKEN \   # InfluxDB auth token (optional)
+  --influxdb-org ORG \       # InfluxDB organization (optional)
+  --influxdb-database NAME \ # InfluxDB database (optional)
   --verbose                  # Enable debug logging
 ```
 
@@ -362,9 +364,10 @@ uv run python main.py livekit \
   --cooldown MS \            # Cooldown between pings (default: 100)
   --location ID \            # Location identifier (optional)
   --output FILE \            # Save JSON results (optional)
-  --ts-database NAME \       # Timestream database (optional)
-  --ts-table NAME \          # Timestream table (optional)
-  --ts-region REGION \       # AWS region (default: us-west-2)
+  --influxdb-url URL \       # InfluxDB endpoint URL (optional)
+  --influxdb-token TOKEN \   # InfluxDB auth token (optional)
+  --influxdb-org ORG \       # InfluxDB organization (optional)
+  --influxdb-database NAME \ # InfluxDB database (optional)
   --verbose                  # Enable debug logging
 ```
 
@@ -372,17 +375,16 @@ uv run python main.py livekit \
 
 ```bash
 uv run python main.py both \
-  --daily-room URL \         # Daily room URL (required)
-  --livekit-url URL \        # LiveKit server URL (required)
-  --livekit-token TOKEN \    # LiveKit access token (required)
+  --echo-agent-url URL \     # Echo agent API URL (optional)
   --iterations N \           # Number of pings (default: 100)
   --timeout MS \             # Timeout in ms (default: 5000)
   --cooldown MS \            # Cooldown between pings (default: 100)
   --location ID \            # Location identifier (optional)
   --output FILE \            # Save JSON results (optional)
-  --ts-database NAME \       # Timestream database (optional)
-  --ts-table NAME \          # Timestream table (optional)
-  --ts-region REGION \       # AWS region (default: us-west-2)
+  --influxdb-url URL \       # InfluxDB endpoint URL (optional)
+  --influxdb-token TOKEN \   # InfluxDB auth token (optional)
+  --influxdb-org ORG \       # InfluxDB organization (optional)
+  --influxdb-database NAME \ # InfluxDB database (optional)
   --verbose                  # Enable debug logging
 ```
 

@@ -35,14 +35,6 @@ class DailySettings(BaseSettings):
     )
 
     daily_api_key: str = Field(..., description="Daily API key for creating rooms")
-    daily_api_url: str = Field(
-        default="https://api.daily.co/v1",
-        description="Daily API URL",
-    )
-    daily_agent_name: str = Field(
-        default="echo-agent",
-        description="Agent name for Daily rooms",
-    )
 
 
 class LiveKitSettings(BaseSettings):
@@ -60,10 +52,6 @@ class LiveKitSettings(BaseSettings):
     )
     livekit_api_key: str = Field(..., description="LiveKit API key")
     livekit_api_secret: str = Field(..., description="LiveKit API secret")
-    livekit_agent_name: str = Field(
-        default="echo-agent",
-        description="Agent name for LiveKit rooms",
-    )
 
 
 class EchoAgentSettings(BaseSettings):
@@ -88,8 +76,8 @@ class EchoAgentSettings(BaseSettings):
     log_level: str = Field(default="INFO", description="Logging level")
 
 
-class TimestreamSettings(BaseSettings):
-    """AWS Timestream configuration."""
+class InfluxDBSettings(BaseSettings):
+    """Amazon Timestream for InfluxDB 3 configuration."""
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -98,14 +86,15 @@ class TimestreamSettings(BaseSettings):
         extra="ignore",
     )
 
-    aws_region: str = Field(default="us-west-2", description="AWS region for Timestream")
-    timestream_database: str = Field(
-        default="voice-rtc-benchmarks",
-        description="Timestream database name",
+    influxdb_url: str = Field(
+        ...,
+        description="InfluxDB endpoint URL (e.g., https://xxx.timestream-influxdb3.us-east-1.on.aws:8086)",
     )
-    timestream_table: str = Field(
-        default="latency_measurements",
-        description="Timestream table name",
+    influxdb_token: str = Field(..., description="InfluxDB authentication token")
+    influxdb_org: str = Field(default="default", description="InfluxDB organization name")
+    influxdb_database: str = Field(
+        default="voice-rtc-benchmarks",
+        description="InfluxDB database/bucket name",
     )
 
 
@@ -135,8 +124,8 @@ class BenchmarkRunnerSettings(BaseSettings):
     )
     location_id: str = Field(default="unknown", description="Deployment location identifier")
 
-    # AWS Timestream
-    timestream: TimestreamSettings = Field(default_factory=TimestreamSettings)
+    # InfluxDB
+    influxdb: InfluxDBSettings = Field(default_factory=InfluxDBSettings)
 
     # Logging
     log_level: str = Field(default="INFO", description="Logging level")

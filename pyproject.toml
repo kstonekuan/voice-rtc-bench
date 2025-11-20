@@ -3,6 +3,7 @@ members = ["benchmark_runner", "echo_agent", "shared"]
 
 [tool.uv.sources]
 shared = { workspace = true }
+benchmark-runner = { workspace = true }
 
 [project]
 name = "voice-rtc-bench"

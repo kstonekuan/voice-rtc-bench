@@ -13,9 +13,9 @@ from shared.settings import BenchmarkRunnerSettings
 from shared.utils import setup_logging
 
 from .echo_agent_client import get_room_credentials
+from .influxdb import InfluxDBClientWrapper
 from .runners import DailyBenchmarkRunner, LiveKitBenchmarkRunner
 from .stats import format_statistics
-from .timestream import TimestreamClient
 from .types import BenchmarkConfig
 
 # Load settings from environment
@@ -35,17 +35,19 @@ def configure_logging(verbose: bool = False) -> None:
     setup_logging(level=level, use_rich=True)
 
 
-def create_timestream_client(
+def create_influxdb_client(
+    url: str | None,
+    token: str | None,
+    org: str | None,
     database: str | None,
-    table: str | None,
-    region: str | None,
-) -> TimestreamClient | None:
-    """Create Timestream client if credentials provided."""
-    if database and table:
-        return TimestreamClient(
-            database_name=database,
-            table_name=table,
-            region_name=region or "us-west-2",
+) -> InfluxDBClientWrapper | None:
+    """Create InfluxDB client if credentials provided."""
+    if url and token and database:
+        return InfluxDBClientWrapper(
+            url=url,
+            token=token,
+            org=org or "default",
+            database=database,
         )
     return None
 
@@ -58,15 +60,16 @@ def daily(
     cooldown: int = typer.Option(100, "--cooldown", "-c", help="Cooldown between pings (ms)"),
     location_id: str = typer.Option(None, "--location", "-l", help="Location identifier"),
     output: Path = typer.Option(None, "--output", "-o", help="Save results to JSON file"),
-    timestream_database: str = typer.Option(None, "--ts-database", help="Timestream database"),
-    timestream_table: str = typer.Option(None, "--ts-table", help="Timestream table"),
-    timestream_region: str = typer.Option("us-west-2", "--ts-region", help="Timestream region"),
+    influxdb_url: str = typer.Option(None, "--influxdb-url", help="InfluxDB endpoint URL"),
+    influxdb_token: str = typer.Option(None, "--influxdb-token", help="InfluxDB auth token"),
+    influxdb_org: str = typer.Option(None, "--influxdb-org", help="InfluxDB organization"),
+    influxdb_database: str = typer.Option(None, "--influxdb-database", help="InfluxDB database"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable verbose logging"),
 ) -> None:
     """Run benchmark on Daily platform."""
     configure_logging(verbose)
 
-    timestream = create_timestream_client(timestream_database, timestream_table, timestream_region)
+    influxdb = create_influxdb_client(influxdb_url, influxdb_token, influxdb_org, influxdb_database)
 
     config = BenchmarkConfig(
         iterations=iterations,
@@ -90,10 +93,10 @@ def daily(
                 output.write_text(result.model_dump_json(indent=2))
                 console.print(f"\n💾 Results saved to: {output}")
 
-            # Write to Timestream if configured
-            if timestream:
-                if timestream.write_benchmark_result(result):
-                    console.print("💾 Results written to Timestream")
+            # Write to InfluxDB if configured
+            if influxdb:
+                if influxdb.write_benchmark_result(result):
+                    console.print("💾 Results written to InfluxDB")
 
             return result
 
@@ -121,15 +124,16 @@ def livekit(
     cooldown: int = typer.Option(100, "--cooldown", "-c", help="Cooldown between pings (ms)"),
     location_id: str = typer.Option(None, "--location", "-l", help="Location identifier"),
     output: Path = typer.Option(None, "--output", "-o", help="Save results to JSON file"),
-    timestream_database: str = typer.Option(None, "--ts-database", help="Timestream database"),
-    timestream_table: str = typer.Option(None, "--ts-table", help="Timestream table"),
-    timestream_region: str = typer.Option("us-west-2", "--ts-region", help="Timestream region"),
+    influxdb_url: str = typer.Option(None, "--influxdb-url", help="InfluxDB endpoint URL"),
+    influxdb_token: str = typer.Option(None, "--influxdb-token", help="InfluxDB auth token"),
+    influxdb_org: str = typer.Option(None, "--influxdb-org", help="InfluxDB organization"),
+    influxdb_database: str = typer.Option(None, "--influxdb-database", help="InfluxDB database"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable verbose logging"),
 ) -> None:
     """Run benchmark on LiveKit platform."""
     configure_logging(verbose)
 
-    timestream = create_timestream_client(timestream_database, timestream_table, timestream_region)
+    influxdb = create_influxdb_client(influxdb_url, influxdb_token, influxdb_org, influxdb_database)
 
     config = BenchmarkConfig(
         iterations=iterations,
@@ -153,10 +157,10 @@ def livekit(
                 output.write_text(result.model_dump_json(indent=2))
                 console.print(f"\n💾 Results saved to: {output}")
 
-            # Write to Timestream if configured
-            if timestream:
-                if timestream.write_benchmark_result(result):
-                    console.print("💾 Results written to Timestream")
+            # Write to InfluxDB if configured
+            if influxdb:
+                if influxdb.write_benchmark_result(result):
+                    console.print("💾 Results written to InfluxDB")
 
             return result
 
@@ -188,9 +192,10 @@ def both(
     cooldown: int = typer.Option(None, "--cooldown", "-c", help="Cooldown between pings (ms)"),
     location_id: str = typer.Option(None, "--location", "-l", help="Location identifier"),
     output: Path = typer.Option(None, "--output", "-o", help="Save results to JSON file"),
-    timestream_database: str = typer.Option(None, "--ts-database", help="Timestream database"),
-    timestream_table: str = typer.Option(None, "--ts-table", help="Timestream table"),
-    timestream_region: str = typer.Option(None, "--ts-region", help="Timestream region"),
+    influxdb_url: str = typer.Option(None, "--influxdb-url", help="InfluxDB endpoint URL"),
+    influxdb_token: str = typer.Option(None, "--influxdb-token", help="InfluxDB auth token"),
+    influxdb_org: str = typer.Option(None, "--influxdb-org", help="InfluxDB organization"),
+    influxdb_database: str = typer.Option(None, "--influxdb-database", help="InfluxDB database"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable verbose logging"),
 ) -> None:
     """
@@ -207,11 +212,12 @@ def both(
     timeout = timeout or settings.timeout_ms
     cooldown = cooldown or settings.cooldown_ms
     location_id = location_id or settings.location_id
-    timestream_database = timestream_database or settings.timestream.timestream_database
-    timestream_table = timestream_table or settings.timestream.timestream_table
-    timestream_region = timestream_region or settings.timestream.aws_region
+    influxdb_url = influxdb_url or settings.influxdb.influxdb_url
+    influxdb_token = influxdb_token or settings.influxdb.influxdb_token
+    influxdb_org = influxdb_org or settings.influxdb.influxdb_org
+    influxdb_database = influxdb_database or settings.influxdb.influxdb_database
 
-    timestream = create_timestream_client(timestream_database, timestream_table, timestream_region)
+    influxdb = create_influxdb_client(influxdb_url, influxdb_token, influxdb_org, influxdb_database)
 
     config = BenchmarkConfig(
         iterations=iterations,
@@ -276,12 +282,12 @@ def both(
                 output.write_text(json.dumps(combined_results, indent=2))
                 console.print(f"\n💾 Results saved to: {output}")
 
-            # Write to Timestream if configured
-            if timestream:
-                if timestream.write_benchmark_result(daily_result):
-                    console.print("💾 Daily results written to Timestream")
-                if timestream.write_benchmark_result(livekit_result):
-                    console.print("💾 LiveKit results written to Timestream")
+            # Write to InfluxDB if configured
+            if influxdb:
+                if influxdb.write_benchmark_result(daily_result):
+                    console.print("💾 Daily results written to InfluxDB")
+                if influxdb.write_benchmark_result(livekit_result):
+                    console.print("💾 LiveKit results written to InfluxDB")
 
             return daily_result, livekit_result
 

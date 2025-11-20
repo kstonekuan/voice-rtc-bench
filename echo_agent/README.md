@@ -31,16 +31,11 @@ API_PORT=8080
 
 # Daily API Key (for creating rooms)
 DAILY_API_KEY=your-daily-api-key-here
-DAILY_API_URL=https://api.daily.co/v1
 
 # LiveKit Configuration
 LIVEKIT_URL=wss://your-project.livekit.cloud
 LIVEKIT_API_KEY=your-api-key
 LIVEKIT_API_SECRET=your-api-secret
-
-# Optional: Custom agent names
-DAILY_AGENT_NAME=echo-daily
-LIVEKIT_AGENT_NAME=echo-livekit
 
 # Optional: Logging
 LOG_LEVEL=INFO

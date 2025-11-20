@@ -98,7 +98,7 @@ class TimestreamSettings(BaseSettings):
         extra="ignore",
     )
 
-    aws_region: str = Field(default="us-east-1", description="AWS region for Timestream")
+    aws_region: str = Field(default="us-west-2", description="AWS region for Timestream")
     timestream_database: str = Field(
         default="voice-rtc-benchmarks",
         description="Timestream database name",

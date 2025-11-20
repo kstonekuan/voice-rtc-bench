@@ -9,7 +9,7 @@ const router = Router();
 
 // Initialize Timestream client
 const timestream = new TimestreamClient({
-	region: process.env.AWS_REGION || "us-east-1",
+	region: process.env.AWS_REGION || "us-west-2",
 	database: process.env.TIMESTREAM_DATABASE || "voice-rtc-benchmarks",
 	table: process.env.TIMESTREAM_TABLE || "latency_measurements",
 });

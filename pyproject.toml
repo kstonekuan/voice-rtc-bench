@@ -1,5 +1,5 @@
 [tool.uv.workspace]
-members = ["benchmark-runner", "echo-agent", "shared"]
+members = ["benchmark_runner", "echo_agent", "shared"]
 
 [tool.uv.sources]
 shared = { workspace = true }

@@ -63,6 +63,8 @@ voice-rtc-bench/
                       ▼
            ┌──────────────────────────────────┐
            │  WebRTC Rooms (Temporary)        │
+           │  • Echo agents leave when        │
+           │    client disconnects            │
            │  • Daily: Auto-expires (10 min)  │
            │  • LiveKit: Auto-cleanup         │
            └──────────┬───────────────────────┘
@@ -96,8 +98,9 @@ voice-rtc-bench/
 3. **Echo Agent** creates temporary rooms for both platforms and returns credentials
 4. **Benchmark Runners** connect to rooms and run ping-pong latency tests
 5. **Results** are written to Amazon Timestream for time-series storage
-6. **Rooms auto-expire** after 10 minutes (Daily) or when empty (LiveKit)
-7. **Dashboard** queries Timestream and visualizes metrics with filters
+6. **Echo agents automatically leave** the room when the benchmark client disconnects
+7. **Rooms auto-expire** after 10 minutes (Daily) or when empty (LiveKit)
+8. **Dashboard** queries Timestream and visualizes metrics with filters
 
 ## Quick Start
 
@@ -202,7 +205,8 @@ The benchmark runner will:
 2. Connect to both Daily and LiveKit rooms
 3. Run ping-pong latency tests
 4. Write results to Timestream
-5. Rooms auto-expire after 10 minutes
+5. Echo agents automatically leave when the client disconnects
+6. Rooms auto-expire after 10 minutes
 
 ### Step 4: View Results in Dashboard
 
@@ -343,7 +347,7 @@ uv run python main.py daily \
   --output FILE \            # Save JSON results (optional)
   --ts-database NAME \       # Timestream database (optional)
   --ts-table NAME \          # Timestream table (optional)
-  --ts-region REGION \       # AWS region (default: us-east-1)
+  --ts-region REGION \       # AWS region (default: us-west-2)
   --verbose                  # Enable debug logging
 ```
 
@@ -360,7 +364,7 @@ uv run python main.py livekit \
   --output FILE \            # Save JSON results (optional)
   --ts-database NAME \       # Timestream database (optional)
   --ts-table NAME \          # Timestream table (optional)
-  --ts-region REGION \       # AWS region (default: us-east-1)
+  --ts-region REGION \       # AWS region (default: us-west-2)
   --verbose                  # Enable debug logging
 ```
 
@@ -378,7 +382,7 @@ uv run python main.py both \
   --output FILE \            # Save JSON results (optional)
   --ts-database NAME \       # Timestream database (optional)
   --ts-table NAME \          # Timestream table (optional)
-  --ts-region REGION \       # AWS region (default: us-east-1)
+  --ts-region REGION \       # AWS region (default: us-west-2)
   --verbose                  # Enable debug logging
 ```
 

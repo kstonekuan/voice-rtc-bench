@@ -7,7 +7,7 @@ FastAPI-powered echo agent with on-demand room creation for Daily and LiveKit pl
 - **On-Demand Room Creation**: Creates temporary rooms via REST API
 - **Dual Platform Support**: Handles both Daily and LiveKit simultaneously
 - **Pipecat-Style Architecture**: HTTP API for benchmark orchestration
-- **Auto-Expiring Rooms**: Daily rooms expire in 10 minutes, LiveKit auto-cleans
+- **Auto-Cleanup**: Echo agents leave when clients disconnect, rooms auto-expire
 - **Production Ready**: FastAPI server, error handling, and logging
 
 ## Installation
@@ -60,6 +60,7 @@ The agent will:
 4. Join Daily rooms dynamically when requested
 5. Handle LiveKit rooms via worker pattern
 6. Respond to ping messages on both platforms
+7. Automatically leave rooms when the last client disconnects
 
 ## API Endpoints
 

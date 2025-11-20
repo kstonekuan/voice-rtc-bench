@@ -19,7 +19,7 @@ class TimestreamClient:
         self,
         database_name: str,
         table_name: str,
-        region_name: str = "us-east-1",
+        region_name: str = "us-west-2",
     ):
         """
         Initialize Timestream client.
@@ -27,7 +27,7 @@ class TimestreamClient:
         Args:
             database_name: Timestream database name
             table_name: Timestream table name
-            region_name: AWS region (default: us-east-1)
+            region_name: AWS region (default: us-west-2)
         """
         self.database_name = database_name
         self.table_name = table_name

@@ -45,7 +45,7 @@ def create_timestream_client(
         return TimestreamClient(
             database_name=database,
             table_name=table,
-            region_name=region or "us-east-1",
+            region_name=region or "us-west-2",
         )
     return None
 
@@ -60,7 +60,7 @@ def daily(
     output: Path = typer.Option(None, "--output", "-o", help="Save results to JSON file"),
     timestream_database: str = typer.Option(None, "--ts-database", help="Timestream database"),
     timestream_table: str = typer.Option(None, "--ts-table", help="Timestream table"),
-    timestream_region: str = typer.Option("us-east-1", "--ts-region", help="Timestream region"),
+    timestream_region: str = typer.Option("us-west-2", "--ts-region", help="Timestream region"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable verbose logging"),
 ) -> None:
     """Run benchmark on Daily platform."""
@@ -123,7 +123,7 @@ def livekit(
     output: Path = typer.Option(None, "--output", "-o", help="Save results to JSON file"),
     timestream_database: str = typer.Option(None, "--ts-database", help="Timestream database"),
     timestream_table: str = typer.Option(None, "--ts-table", help="Timestream table"),
-    timestream_region: str = typer.Option("us-east-1", "--ts-region", help="Timestream region"),
+    timestream_region: str = typer.Option("us-west-2", "--ts-region", help="Timestream region"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable verbose logging"),
 ) -> None:
     """Run benchmark on LiveKit platform."""

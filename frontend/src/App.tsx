@@ -468,7 +468,9 @@ function TimeSeriesChart({
 	>();
 
 	for (const point of data) {
-		const timestamp = new Date(point.timestamp).toLocaleString();
+		// Convert timestamp string to number (milliseconds) and create Date
+		const timestampMs = Math.floor(Number(point.timestamp));
+		const timestamp = new Date(timestampMs).toLocaleString();
 
 		const existing = dataMap.get(timestamp);
 		if (existing) {

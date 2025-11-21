@@ -45,12 +45,13 @@ class MessageHandler:
     def create_pong_message(self, client_timestamp: float) -> dict[str, Any]:
         """Create a pong response message."""
         self.message_count += 1
-        server_receive_time = time.time() * 1000
+        # Use perf_counter for consistent timing with client measurements
+        server_receive_time = time.perf_counter() * 1000
 
         pong = PongMessage(
             client_timestamp=client_timestamp,
             server_receive_time=server_receive_time,
-            server_send_time=time.time() * 1000,
+            server_send_time=time.perf_counter() * 1000,
             message_count=self.message_count,
         )
         return pong.model_dump()

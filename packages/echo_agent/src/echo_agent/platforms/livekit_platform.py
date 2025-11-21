@@ -5,7 +5,6 @@ Contains all LiveKit-specific code including agent logic and API endpoints.
 """
 
 import asyncio
-import json
 import threading
 import time
 from collections.abc import AsyncGenerator
@@ -19,9 +18,9 @@ from livekit import api as livekit_api
 from livekit import rtc
 from livekit.agents import AgentServer, AutoSubscribe, JobContext
 from loguru import logger
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 from shared.settings import EchoAgentSettings
-from shared.types import LiveKitRoomInfo, PongMessage, RoomCredentials
+from shared.types import LiveKitRoomInfo, PingMessage, PongMessage, RoomCredentials
 from shared.utils import setup_logging
 
 from echo_agent.base import PlatformHandler
@@ -42,12 +41,13 @@ class MessageHandler:
     def create_pong_message(self, client_timestamp: float) -> dict[str, Any]:
         """Create a pong response message."""
         self.message_count += 1
-        server_receive_time = time.time() * 1000
+        # Use perf_counter for consistent timing with client measurements
+        server_receive_time = time.perf_counter() * 1000
 
         pong = PongMessage(
             client_timestamp=client_timestamp,
             server_receive_time=server_receive_time,
-            server_send_time=time.time() * 1000,
+            server_send_time=time.perf_counter() * 1000,
             message_count=self.message_count,
         )
         return pong.model_dump()
@@ -71,26 +71,25 @@ class LiveKitEchoHandler:
     async def handle_data_received(self, data_packet: rtc.DataPacket) -> None:
         """Handle incoming data channel messages."""
         try:
-            message_str = data_packet.data.decode("utf-8")
-            data = json.loads(message_str)
+            # Use Pydantic V2's Rust-based JSON parser (faster than orjson)
+            # Parse and validate in one fast operation
+            ping = PingMessage.model_validate_json(data_packet.data)
 
-            message_type = data.get("type")
-
-            if message_type == "ping":
-                client_timestamp = data.get("timestamp")
-                pong_message = self.handler.create_pong_message(client_timestamp)
+            if ping.type == "ping":
+                pong_message = self.handler.create_pong_message(ping.timestamp)
 
                 if self.room:
-                    pong_json = json.dumps(pong_message)
+                    # Use Pydantic V2's Rust-based serializer (faster than orjson)
+                    pong_json = PongMessage(**pong_message).model_dump_json()
                     await self.room.local_participant.publish_data(
                         pong_json.encode("utf-8"),
                         reliable=True,
                     )
             else:
-                logger.debug(f"[LiveKit] Unknown message type: {message_type}")
+                logger.debug(f"[LiveKit] Unknown message type: {ping.type}")
 
-        except json.JSONDecodeError as e:
-            logger.error(f"[LiveKit] Failed to parse message: {e}")
+        except ValidationError as e:
+            logger.error(f"[LiveKit] Failed to validate message: {e}")
         except Exception as e:
             logger.error(f"[LiveKit] Error handling data packet: {e}", exc_info=True)
 

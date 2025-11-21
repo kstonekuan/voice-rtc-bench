@@ -100,6 +100,7 @@ export class InfluxDBClientWrapper {
 			const safeMetric = validateSQLIdentifier(metric);
 
 			// Build query with safe parameter interpolation
+			// Aggregate all data within the time range into a single value per platform/location
 			let query = `
         SELECT
           platform,
@@ -109,7 +110,7 @@ export class InfluxDBClientWrapper {
           MIN(${safeMetric}) as min_value,
           MAX(${safeMetric}) as max_value,
           COUNT(${safeMetric}) as sample_count,
-          DATE_BIN(INTERVAL '${Number(hours_ago)} hours', time, TIMESTAMP '1970-01-01') as time_period
+          MAX(time) as time_period
         FROM latency_measurements
         WHERE time >= now() - INTERVAL '${Number(hours_ago)} hours'
           AND ${safeMetric} IS NOT NULL
@@ -124,8 +125,8 @@ export class InfluxDBClientWrapper {
 				query += ` AND location_id = '${escapeSQLString(location_id)}'`;
 			}
 
-			query += " GROUP BY platform, location_id, time_period";
-			query += " ORDER BY time_period DESC";
+			query += " GROUP BY platform, location_id";
+			query += " ORDER BY platform, location_id";
 
 			try {
 				const records = await this.client.query(query, this.database, {

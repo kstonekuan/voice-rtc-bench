@@ -2,12 +2,11 @@
 LiveKit platform benchmark runner.
 """
 
-import json
-
 from livekit import rtc
 from loguru import logger
+from pydantic import ValidationError
 
-from benchmark_runner.types import PingMessage
+from benchmark_runner.types import PingMessage, PongMessage
 
 from .base import BaseBenchmarkRunner
 
@@ -24,15 +23,45 @@ class LiveKitBenchmarkRunner(BaseBenchmarkRunner):
     def _handle_data_received(self, payload: bytes, participant: rtc.Participant | None) -> None:
         """Handle incoming data channel messages."""
         try:
-            # Decode message
-            message_str = payload.decode("utf-8")
-            data = json.loads(message_str)
+            # Use Pydantic V2's Rust-based JSON parser (faster than orjson + validate)
+            # See: https://github.com/pydantic/pydantic/discussions/6388#discussioncomment-13944196
+            # This skips intermediate dict conversion and validates in one fast Rust operation
+            pong = PongMessage.model_validate_json(payload)
 
-            # Delegate to base class handler
-            self.handle_pong_message(data)
+            # Only process pong messages
+            if pong.type != "pong":
+                return
 
-        except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse pong message: {e}")
+            import time
+
+            receive_time = time.perf_counter() * 1000
+
+            # Find matching ping
+            send_time = self.pending_pings.pop(pong.client_timestamp, None)
+
+            if send_time is not None:
+                from benchmark_runner.types import LatencyMeasurement
+
+                # Calculate latency metrics
+                round_trip_time = receive_time - send_time
+                client_to_server = pong.server_receive_time - pong.client_timestamp
+                server_to_client = receive_time - pong.server_send_time
+
+                measurement = LatencyMeasurement(
+                    round_trip_time=round_trip_time,
+                    client_to_server=client_to_server,
+                    server_to_client=server_to_client,
+                    message_number=len(self.measurements) + 1,
+                    timestamp=receive_time,
+                )
+
+                self.measurements.append(measurement)
+                logger.debug(
+                    f"📊 Measurement #{measurement.message_number}: RTT={round_trip_time:.2f}ms"
+                )
+
+        except ValidationError as e:
+            logger.warning(f"Invalid pong message format: {e}")
         except Exception as e:
             logger.error(f"Error handling pong message: {e}", exc_info=True)
 
@@ -88,6 +117,7 @@ class LiveKitBenchmarkRunner(BaseBenchmarkRunner):
         if not self.room:
             raise RuntimeError("Must call connect() before sending messages")
 
+        # Use Pydantic V2's Rust-based serializer (faster than orjson)
         ping_json = ping_message.model_dump_json()
         await self.room.local_participant.publish_data(
             ping_json.encode("utf-8"),

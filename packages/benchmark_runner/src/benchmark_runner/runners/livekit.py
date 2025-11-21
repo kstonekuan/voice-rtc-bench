@@ -38,9 +38,12 @@ class LiveKitBenchmarkRunner(BaseBenchmarkRunner):
 
     async def connect(self) -> None:
         """Connect to the LiveKit room."""
+        import asyncio
+
         logger.info("🚀 Initializing LiveKit benchmark runner...")
 
         self.room = rtc.Room()
+        agent_connected = asyncio.Event()
 
         # Set up event handlers
         @self.room.on("data_received")
@@ -50,6 +53,8 @@ class LiveKitBenchmarkRunner(BaseBenchmarkRunner):
         @self.room.on("participant_connected")
         def on_participant_connected(participant: rtc.RemoteParticipant) -> None:
             logger.debug(f"Participant connected: {participant.identity}")
+            # Signal that agent is connected
+            agent_connected.set()
 
         @self.room.on("participant_disconnected")
         def on_participant_disconnected(participant: rtc.RemoteParticipant) -> None:
@@ -60,6 +65,17 @@ class LiveKitBenchmarkRunner(BaseBenchmarkRunner):
         await self.room.connect(self.server_url, self.token)
 
         logger.info("✅ Connected to LiveKit room")
+
+        # Wait for agent to connect (with timeout)
+        logger.info("⏳ Waiting for echo agent to connect...")
+        try:
+            await asyncio.wait_for(agent_connected.wait(), timeout=10.0)
+            logger.info("✅ Echo agent connected and ready")
+        except TimeoutError:
+            logger.warning("⚠️ Timeout waiting for agent, proceeding anyway...")
+
+        # Add small additional delay to ensure data channel is ready
+        await asyncio.sleep(0.1)
 
     async def disconnect(self) -> None:
         """Disconnect from the LiveKit room."""

@@ -20,7 +20,7 @@ class InfluxDBClientWrapper:
         token: str,
         org: str,
         database: str,
-    ):
+    ) -> None:
         """
         Initialize InfluxDB 3 client.
 

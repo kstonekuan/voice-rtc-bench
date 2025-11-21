@@ -19,18 +19,26 @@ This project measures the **network transport baseline latency** of Daily.co and
 
 ```
 voice-rtc-bench/
-├── echo-agent/                # Python echo agent (Daily + LiveKit)
-│   ├── main.py                # Agent + FastAPI server
-│   ├── api.py                 # Room creation endpoints
-│   └── pyproject.toml
-├── benchmark-runner/          # Python CLI for running benchmarks
-│   └── src/
-│       ├── runners/           # Daily and LiveKit benchmark clients
-│       ├── influxdb.py        # InfluxDB 3 integration
-│       └── cli.py             # CLI interface
-└── frontend/                  # React dashboard + TypeScript API
-    ├── src/                   # React app (data visualization)
-    └── server/                # Express API (InfluxDB queries)
+├── packages/
+│   ├── echo_agent/            # Python echo agent (Daily + LiveKit)
+│   │   ├── src/echo_agent/    # Agent source code
+│   │   │   ├── main.py        # Entry point
+│   │   │   ├── platforms/     # Platform-specific implementations
+│   │   │   └── ...
+│   │   └── pyproject.toml
+│   ├── benchmark_runner/      # Python CLI for running benchmarks
+│   │   ├── src/benchmark_runner/
+│   │   │   ├── runners/       # Benchmark clients
+│   │   │   ├── main.py        # Entry point
+│   │   │   └── ...
+│   │   └── pyproject.toml
+│   └── shared/                # Shared utilities and types
+│       └── pyproject.toml
+├── frontend/                  # React dashboard + TypeScript API
+│   ├── src/                   # React app (data visualization)
+│   ├── server/                # Express API (InfluxDB queries)
+│   └── package.json
+└── pyproject.toml             # Workspace configuration
 ```
 
 ## Architecture
@@ -46,56 +54,44 @@ voice-rtc-bench/
 │         │                          │                         │
 │         └──────────┬───────────────┘                         │
 │                    │ 1. POST /connect                        │
-└────────────────────┼─────────────────────────────────────────┘
-                     ▼
-           ┌─────────────────────────────────┐
-           │ Unified Echo Agent (Cloud)      │
-           │ ─────────────────────────────── │
-           │ FastAPI Server (Port 8080)      │
-           │  • POST /connect                │
-           │  • Creates temporary rooms      │
-           │  • Returns credentials          │
-           │ ─────────────────────────────── │
-           │ Daily Handler (on-demand)       │
-           │ LiveKit Worker (dynamic)        │
-           └──────────┬──────────────────────┘
-                      │ 2. WebRTC Ping-Pong
-                      ▼
-           ┌──────────────────────────────────┐
-           │  WebRTC Rooms (Temporary)        │
-           │  • Echo agents leave when        │
-           │    client disconnects            │
-           │  • Daily: Auto-expires (10 min)  │
-           │  • LiveKit: Auto-cleanup         │
-           └──────────┬───────────────────────┘
-                      │ 3. Write results
-                      ▼
-           ┌─────────────────┐
-           │  Amazon         │
-           │  Timestream for │
-           │  InfluxDB 3     │
-           └────────┬────────┘
-                    │ 4. Query metrics
-                    ▼
-           ┌────────────────────────────────┐
-           │  TypeScript API Server         │
-           │  Express + AWS SDK             │
-           │  /api/results/*                │
-           └────────┬───────────────────────┘
-                    │ 5. Visualize
-                    ▼
-           ┌────────────────┐
-           │  React         │
-           │  Dashboard     │
-           │  (Vite)        │
-           └────────────────┘
+│                    │ (to specific platform agent)            │
+│                    ▼                                         │
+├─────────────────────────────────────────────────────────────┤
+│            Echo Agents (Cloud - Separate Processes)          │
+│                                                              │
+│  ┌─────────────────────────┐    ┌─────────────────────────┐  │
+│  │ Daily Agent (Port 8000) │    │ LiveKit Agent (Port 8001)│ │
+│  │ • POST /connect         │    │ • POST /connect         │  │
+│  │ • Creates Daily rooms   │    │ • Creates LiveKit rooms │  │
+│  └──────────┬──────────────┘    └──────────┬──────────────┘  │
+│             │                          │                     │
+│             │ 2. WebRTC Ping-Pong      │                     │
+│             ▼                          ▼                     │
+│  ┌──────────────────────┐       ┌──────────────────────┐     │
+│  │ Daily WebRTC Rooms   │       │ LiveKit WebRTC Rooms │     │
+│  └──────────┬───────────┘       └──────────┬───────────┘     │
+│             │                          │                     │
+│             │ 3. Write results         │                     │
+│             ▼                          ▼                     │
+│  ┌─────────────────────────────────────────────────────┐     │
+│  │          Amazon Timestream for InfluxDB 3           │     │
+│  └──────────────────────────┬──────────────────────────┘     │
+│                             │ 4. Query metrics               │
+│                             ▼                                │
+│  ┌─────────────────────────────────────────────────────┐     │
+│  │             TypeScript API Server                   │     │
+│  └──────────────────────────┬──────────────────────────┘     │
+│                             │ 5. Visualize                   │
+│                             ▼                                │
+│  ┌─────────────────────────────────────────────────────┐     │
+│  │                React Dashboard                      │     │
+└─────────────────────────────────────────────────────────────┘
 ```
 
 ### How It Works
 
-1. **Echo Agent** runs continuously in the cloud with FastAPI server on port 8080
-2. **Benchmark Runners** (scheduled or manual) call `POST /connect` API endpoint
-3. **Echo Agent** creates temporary rooms for both platforms and returns credentials
+2. **Benchmark Runners** (scheduled or manual) call `POST /connect` API endpoint on the respective agent
+3. **Echo Agents** create temporary rooms and return credentials
 4. **Benchmark Runners** connect to rooms and run ping-pong latency tests
 5. **Results** are written to Amazon Timestream for InfluxDB for time-series storage
 6. **Echo agents automatically leave** the room when the benchmark client disconnects
@@ -132,60 +128,35 @@ voice-rtc-bench/
 4. Get your authentication token from AWS Secrets Manager
 5. Create database/bucket: `voice-rtc-benchmarks`
 
-### Step 2: Start Echo Agent
+### Step 2: Start Echo Agents
 
-The echo agent runs as a FastAPI server that creates rooms on-demand:
+The echo agents run as separate processes. You can run them in separate terminals.
 
+**Daily Agent (Port 8000):**
 ```bash
-cd echo-agent
-uv sync
-cp .env.example .env
+# From root directory
+uv run echo-agent --platform daily
 ```
 
-Edit `.env` and configure:
+**LiveKit Agent (Port 8001):**
 ```bash
-# Daily API key for creating rooms
-DAILY_API_KEY=your-daily-api-key-here
-
-# LiveKit credentials
-LIVEKIT_URL=wss://your-project.livekit.cloud
-LIVEKIT_API_KEY=your-api-key
-LIVEKIT_API_SECRET=your-api-secret
-
-# API server configuration
-API_HOST=0.0.0.0
-API_PORT=8080
+# From root directory
+uv run echo-agent --platform livekit
 ```
 
-Start the agent:
-```bash
-uv run python main.py
-```
-
-You should see:
-```
-========================================================================
-🎯 Unified Echo Agent with On-Demand Room Creation
-========================================================================
-Daily API:   ✅ Enabled
-LiveKit:     ✅ Enabled
-API Server:  ✅ Running on port 8080
-========================================================================
-✅ API server started on http://0.0.0.0:8080
-📍 Endpoints: POST /connect, GET /health, GET /rooms
-```
+You should see output indicating the server is running on the respective port.
 
 ### Step 3: Run Benchmarks
 
 The benchmark runner automatically requests room credentials from the echo agent:
 
 ```bash
-cd benchmark-runner
-uv sync
-
-# Run benchmarks on both platforms (recommended)
-uv run python main.py both \
-  --echo-agent-url "http://localhost:8080" \
+```bash
+# From root directory
+# Run benchmarks on both platforms
+uv run benchmark-runner both \
+  --daily-agent-url "http://localhost:8000" \
+  --livekit-agent-url "http://localhost:8001" \
   --iterations 100 \
   --location "us-west-2"
 ```
@@ -193,8 +164,9 @@ uv run python main.py both \
 **With InfluxDB integration:**
 
 ```bash
-uv run python main.py both \
-  --echo-agent-url "http://localhost:8080" \
+uv run benchmark-runner both \
+  --daily-agent-url "http://localhost:8000" \
+  --livekit-agent-url "http://localhost:8001" \
   --location "us-west-2" \
   --influxdb-url "https://your-instance.timestream-influxdb3.us-east-1.on.aws:8086" \
   --influxdb-token "your-token" \
@@ -236,21 +208,32 @@ The dashboard shows:
 
 ## Deployment
 
-### Unified Echo Agent
+### Echo Agents
 
-Deploy to any Python hosting platform:
+Deploy separate services for Daily and LiveKit agents.
 
-**Fly.io:**
+**Fly.io (Daily Agent):**
 ```bash
-cd echo-agent
-fly launch
-fly secrets set DAILY_API_KEY="..." LIVEKIT_URL="..." LIVEKIT_API_KEY="..." LIVEKIT_API_SECRET="..."
+cd packages/echo_agent
+fly launch --name voice-rtc-daily
+fly secrets set DAILY_API_KEY="..."
+# Update fly.toml to run: echo-agent --platform daily
+fly deploy
+```
+
+**Fly.io (LiveKit Agent):**
+```bash
+cd packages/echo_agent
+fly launch --name voice-rtc-livekit
+fly secrets set LIVEKIT_URL="..." LIVEKIT_API_KEY="..." LIVEKIT_API_SECRET="..."
+# Update fly.toml to run: echo-agent --platform livekit
 fly deploy
 ```
 
 **Railway / Render:**
-- Use `Dockerfile` or `uv run python main.py`
-- Set environment variables via dashboard
+- Create two services from the same repo.
+- Service 1 (Daily): Command `uv run echo-agent --platform daily`
+- Service 2 (LiveKit): Command `uv run echo-agent --platform livekit`
 
 ### Benchmark Runners
 
@@ -263,17 +246,17 @@ Deploy to multiple locations using:
 
 **Cron Jobs:**
 ```bash
-# Run every hour
-0 * * * * cd /path/to/benchmark-runner && uv run python main.py both ... --location "us-west-2"
+# Run every hour from root directory
+0 * * * * cd /path/to/voice-rtc-bench && uv run benchmark-runner both ... --location "us-west-2"
 ```
 
 **Docker:**
 ```dockerfile
 FROM python:3.11-slim
 WORKDIR /app
-COPY benchmark-runner/ .
-RUN pip install uv && uv sync
-CMD ["uv", "run", "python", "main.py", "both", ...]
+COPY . .
+RUN pip install uv && uv sync --all-packages
+CMD ["uv", "run", "benchmark-runner", "both", ...]
 ```
 
 ### Frontend + API
@@ -339,7 +322,8 @@ The dashboard shows which platform has lower latency for each metric across loca
 ### Daily Benchmark
 
 ```bash
-uv run python main.py daily \
+# Run from root directory
+uv run benchmark-runner daily \
   --room-url URL \           # Daily room URL (required)
   --iterations N \           # Number of pings (default: 100)
   --timeout MS \             # Timeout in ms (default: 5000)
@@ -356,7 +340,8 @@ uv run python main.py daily \
 ### LiveKit Benchmark
 
 ```bash
-uv run python main.py livekit \
+# Run from root directory
+uv run benchmark-runner livekit \
   --server-url URL \         # LiveKit server URL (required)
   --token TOKEN \            # Access token (required)
   --iterations N \           # Number of pings (default: 100)
@@ -374,8 +359,10 @@ uv run python main.py livekit \
 ### Both Platforms (Parallel)
 
 ```bash
-uv run python main.py both \
-  --echo-agent-url URL \     # Echo agent API URL (optional)
+# Run from root directory
+uv run benchmark-runner both \
+  --daily-agent-url URL \    # Daily Agent API URL (optional)
+  --livekit-agent-url URL \  # LiveKit Agent API URL (optional)
   --iterations N \           # Number of pings (default: 100)
   --timeout MS \             # Timeout in ms (default: 5000)
   --cooldown MS \            # Cooldown between pings (default: 100)
@@ -448,11 +435,11 @@ Get latest statistics for all locations and platforms.
 
 All projects use linting and type checking:
 
-**Python (echo-agent + benchmark-runner):**
+**Python (from root directory):**
 ```bash
-uvx ruff check .          # Lint
-uvx ruff format .         # Format
-uvx ty check .            # Type check
+uv run ruff check --fix     # Lint and fix
+uv run ruff format          # Format
+uv run ty check             # Type check
 ```
 
 **TypeScript (frontend):**

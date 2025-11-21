@@ -7,14 +7,15 @@ import json
 from livekit import rtc
 from loguru import logger
 
-from ..types import PingMessage
+from benchmark_runner.types import PingMessage
+
 from .base import BaseBenchmarkRunner
 
 
 class LiveKitBenchmarkRunner(BaseBenchmarkRunner):
     """Benchmark runner for LiveKit platform."""
 
-    def __init__(self, server_url: str, token: str):
+    def __init__(self, server_url: str, token: str) -> None:
         super().__init__()
         self.server_url = server_url
         self.token = token
@@ -43,15 +44,15 @@ class LiveKitBenchmarkRunner(BaseBenchmarkRunner):
 
         # Set up event handlers
         @self.room.on("data_received")
-        def on_data_received(data: rtc.DataPacket):
+        def on_data_received(data: rtc.DataPacket) -> None:
             self._handle_data_received(data.data, data.participant)
 
         @self.room.on("participant_connected")
-        def on_participant_connected(participant: rtc.RemoteParticipant):
+        def on_participant_connected(participant: rtc.RemoteParticipant) -> None:
             logger.debug(f"Participant connected: {participant.identity}")
 
         @self.room.on("participant_disconnected")
-        def on_participant_disconnected(participant: rtc.RemoteParticipant):
+        def on_participant_disconnected(participant: rtc.RemoteParticipant) -> None:
             logger.debug(f"Participant disconnected: {participant.identity}")
 
         # Connect to room

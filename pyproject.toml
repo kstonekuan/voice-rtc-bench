@@ -1,18 +1,17 @@
 [tool.uv.workspace]
-members = ["benchmark_runner", "echo_agent", "shared"]
-
-[tool.uv.sources]
-shared = { workspace = true }
-benchmark-runner = { workspace = true }
-
-[project]
-name = "voice-rtc-bench"
-version = "0.1.0"
-description = "Voice RTC benchmarking workspace"
-requires-python = ">=3.11"
+members = ["packages/benchmark_runner", "packages/echo_agent", "packages/shared"]
 
 [dependency-groups]
-dev = ["ruff>=0.9.0", "ty"]
+dev = [
+    "ruff>=0.9.0",
+    "ty",
+    "echo-agent",
+    "benchmark-runner",
+]
+
+[tool.uv.sources]
+echo-agent = { workspace = true }
+benchmark-runner = { workspace = true }
 
 [tool.ruff]
 line-length = 100

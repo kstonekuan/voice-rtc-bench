@@ -12,7 +12,7 @@ from rich.console import Console
 from shared.settings import BenchmarkRunnerSettings
 from shared.utils import setup_logging
 
-from .echo_agent_client import get_room_credentials
+from .echo_agent_client import EchoAgentClient, get_room_credentials
 from .influxdb import InfluxDBClientWrapper
 from .runners import DailyBenchmarkRunner, LiveKitBenchmarkRunner
 from .stats import format_statistics
@@ -78,7 +78,7 @@ def daily(
         location_id=location_id,
     )
 
-    async def run():
+    async def run() -> None:
         runner = DailyBenchmarkRunner(room_url)
 
         try:
@@ -94,11 +94,8 @@ def daily(
                 console.print(f"\n💾 Results saved to: {output}")
 
             # Write to InfluxDB if configured
-            if influxdb:
-                if influxdb.write_benchmark_result(result):
-                    console.print("💾 Results written to InfluxDB")
-
-            return result
+            if influxdb and influxdb.write_benchmark_result(result):
+                console.print("💾 Results written to InfluxDB")
 
         finally:
             await runner.disconnect()
@@ -142,7 +139,7 @@ def livekit(
         location_id=location_id,
     )
 
-    async def run():
+    async def run() -> None:
         runner = LiveKitBenchmarkRunner(server_url, token)
 
         try:
@@ -158,11 +155,8 @@ def livekit(
                 console.print(f"\n💾 Results saved to: {output}")
 
             # Write to InfluxDB if configured
-            if influxdb:
-                if influxdb.write_benchmark_result(result):
-                    console.print("💾 Results written to InfluxDB")
-
-            return result
+            if influxdb and influxdb.write_benchmark_result(result):
+                console.print("💾 Results written to InfluxDB")
 
         finally:
             await runner.disconnect()
@@ -181,11 +175,15 @@ def livekit(
 
 @app.command()
 def both(
-    echo_agent_url: str = typer.Option(
+    daily_agent_url: str = typer.Option(
         None,
-        "--echo-agent-url",
-        "-u",
-        help="Echo agent API URL (defaults to ECHO_AGENT_URL env var)",
+        "--daily-agent-url",
+        help="Daily agent API URL (defaults to DAILY_AGENT_URL env var)",
+    ),
+    livekit_agent_url: str = typer.Option(
+        None,
+        "--livekit-agent-url",
+        help="LiveKit agent API URL (defaults to LIVEKIT_AGENT_URL env var)",
     ),
     iterations: int = typer.Option(None, "--iterations", "-n", help="Number of pings to send"),
     timeout: int = typer.Option(None, "--timeout", "-t", help="Timeout in milliseconds"),
@@ -201,13 +199,14 @@ def both(
     """
     Run benchmarks on both Daily and LiveKit platforms in parallel.
 
-    This command requests room credentials from the echo agent API and then
+    This command requests room credentials from the separate echo agent APIs and then
     runs benchmarks on both platforms simultaneously.
     """
     configure_logging(verbose)
 
     # Use settings for defaults
-    echo_agent_url = echo_agent_url or settings.echo_agent_url
+    daily_agent_url = daily_agent_url or settings.daily_agent_url
+    livekit_agent_url = livekit_agent_url or settings.livekit_agent_url
     iterations = iterations or settings.iterations
     timeout = timeout or settings.timeout_ms
     cooldown = cooldown or settings.cooldown_ms
@@ -216,6 +215,16 @@ def both(
     influxdb_token = influxdb_token or settings.influxdb.influxdb_token
     influxdb_org = influxdb_org or settings.influxdb.influxdb_org
     influxdb_database = influxdb_database or settings.influxdb.influxdb_database
+
+    if not daily_agent_url:
+        console.print("❌ Missing Daily agent URL. Set DAILY_AGENT_URL or use --daily-agent-url")
+        sys.exit(1)
+
+    if not livekit_agent_url:
+        console.print(
+            "❌ Missing LiveKit agent URL. Set LIVEKIT_AGENT_URL or use --livekit-agent-url"
+        )
+        sys.exit(1)
 
     influxdb = create_influxdb_client(influxdb_url, influxdb_token, influxdb_org, influxdb_database)
 
@@ -226,25 +235,42 @@ def both(
         location_id=location_id,
     )
 
-    async def run_both():
-        # Request room credentials from echo agent
-        console.print(f"🔗 Requesting room credentials from echo agent: {echo_agent_url}")
+    async def run_both() -> None:
+        # Request room credentials from echo agents
+        console.print(f"🔗 Requesting Daily credentials from: {daily_agent_url}")
+        console.print(f"🔗 Requesting LiveKit credentials from: {livekit_agent_url}")
+
         try:
-            credentials = await get_room_credentials(echo_agent_url)
+            daily_creds, livekit_creds = await asyncio.gather(
+                get_room_credentials(daily_agent_url), get_room_credentials(livekit_agent_url)
+            )
         except Exception as e:
             console.print(f"❌ Failed to get room credentials: {e}")
             raise
 
         console.print("✅ Received credentials:")
-        console.print(f"   Daily room: {credentials.daily.room_url}")
-        console.print(f"   LiveKit room: {credentials.livekit.room_name}")
+
+        if daily_creds.daily is None:
+            console.print("❌ Missing Daily credentials from Daily agent")
+            raise ValueError("Daily credentials required")
+
+        if livekit_creds.livekit is None:
+            console.print("❌ Missing LiveKit credentials from LiveKit agent")
+            raise ValueError("LiveKit credentials required")
+
+        console.print(f"   Daily room: {daily_creds.daily.room_url}")
+        console.print(f"   LiveKit room: {livekit_creds.livekit.room_name}")
         console.print()
 
+        # Create echo agent clients for cleanup
+        daily_agent_client = EchoAgentClient(daily_agent_url)
+        livekit_agent_client = EchoAgentClient(livekit_agent_url)
+
         # Create runners with credentials from API
-        daily_runner = DailyBenchmarkRunner(credentials.daily.room_url)
+        daily_runner = DailyBenchmarkRunner(daily_creds.daily.room_url)
         livekit_runner = LiveKitBenchmarkRunner(
-            credentials.livekit.server_url,
-            credentials.livekit.token,
+            livekit_creds.livekit.server_url,
+            livekit_creds.livekit.token,
         )
 
         try:
@@ -289,14 +315,22 @@ def both(
                 if influxdb.write_benchmark_result(livekit_result):
                     console.print("💾 LiveKit results written to InfluxDB")
 
-            return daily_result, livekit_result
-
         finally:
-            # Disconnect both
+            # Disconnect both runners
             await asyncio.gather(
                 daily_runner.disconnect(),
                 livekit_runner.disconnect(),
             )
+
+            # Request echo agent to disconnect and clean up
+            console.print("🔌 Requesting echo agents disconnect...")
+            try:
+                await asyncio.gather(
+                    daily_agent_client.disconnect_room(daily_creds.room_id),
+                    livekit_agent_client.disconnect_room(livekit_creds.room_id),
+                )
+            except Exception as e:
+                console.print(f"⚠️  Failed to disconnect echo agent: {e}")
 
     try:
         asyncio.run(run_both())

@@ -4,19 +4,20 @@ Daily platform benchmark runner.
 
 import asyncio
 import json
-from typing import Any
+from typing import Any, cast
 
 from daily import CallClient, Daily, EventHandler
 from loguru import logger
 
-from ..types import PingMessage
+from benchmark_runner.types import PingMessage
+
 from .base import BaseBenchmarkRunner
 
 
 class DailyBenchmarkRunner(EventHandler, BaseBenchmarkRunner):
     """Benchmark runner for Daily platform."""
 
-    def __init__(self, room_url: str):
+    def __init__(self, room_url: str) -> None:
         EventHandler.__init__(self)
         BaseBenchmarkRunner.__init__(self)
         self.room_url = room_url
@@ -32,24 +33,20 @@ class DailyBenchmarkRunner(EventHandler, BaseBenchmarkRunner):
         self.is_joined = True
         logger.info(f"✅ Joined Daily room: {self.room_url}")
 
-    def on_app_message(self, message: Any, sender: str) -> None:
+    def on_app_message(self, message: object, sender: str) -> None:
         """Handle incoming pong messages."""
         try:
             # Parse incoming message
-            if isinstance(message, str):
-                data = json.loads(message)
-            else:
-                data = message
-
+            data = json.loads(message) if isinstance(message, str) else message
             # Delegate to base class handler
-            self.handle_pong_message(data)
+            self.handle_pong_message(cast(dict[str, Any], data))
 
         except json.JSONDecodeError as e:
             logger.error(f"Failed to parse pong message: {e}")
         except Exception as e:
             logger.error(f"Error handling pong message: {e}", exc_info=True)
 
-    def on_error(self, error: Any) -> None:
+    def on_error(self, error: Exception) -> None:
         """Called when an error occurs."""
         logger.error(f"Daily error: {error}")
 

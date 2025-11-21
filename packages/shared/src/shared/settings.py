@@ -108,10 +108,14 @@ class BenchmarkRunnerSettings(BaseSettings):
         extra="ignore",
     )
 
-    # Echo Agent API
-    echo_agent_url: str = Field(
-        default="http://localhost:8080",
-        description="URL of the echo agent API",
+    # Echo Agent APIs
+    daily_agent_url: str = Field(
+        default="http://localhost:8000",
+        description="URL of the Daily echo agent API",
+    )
+    livekit_agent_url: str = Field(
+        default="http://localhost:8001",
+        description="URL of the LiveKit echo agent API",
     )
 
     # Benchmark parameters

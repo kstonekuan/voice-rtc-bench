@@ -48,8 +48,9 @@ class LiveKitRoomInfo(BaseModel):
 class RoomCredentials(BaseModel):
     """Room credentials for both Daily and LiveKit platforms."""
 
-    daily: DailyRoomInfo
-    livekit: LiveKitRoomInfo
+    room_id: str
+    daily: DailyRoomInfo | None = None
+    livekit: LiveKitRoomInfo | None = None
 
 
 # Benchmark result types

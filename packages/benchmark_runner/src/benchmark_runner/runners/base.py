@@ -10,8 +10,8 @@ from typing import Any, Literal, cast
 from loguru import logger
 from pydantic import ValidationError
 
-from ..stats import calculate_statistics
-from ..types import (
+from benchmark_runner.stats import calculate_statistics
+from benchmark_runner.types import (
     BenchmarkConfig,
     BenchmarkMetadata,
     BenchmarkResult,
@@ -24,7 +24,7 @@ from ..types import (
 class BaseBenchmarkRunner(ABC):
     """Abstract base class for benchmark runners."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         # Benchmark state shared by all platforms
         self.measurements: list[LatencyMeasurement] = []
         self.pending_pings: dict[float, float] = {}  # timestamp -> send_time

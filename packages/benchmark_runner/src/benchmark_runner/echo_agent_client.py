@@ -12,7 +12,7 @@ from shared.types import RoomCredentials
 class EchoAgentClient:
     """Client for interacting with the echo agent API."""
 
-    def __init__(self, base_url: str, timeout: float = 30.0):
+    def __init__(self, base_url: str, timeout: float = 30.0) -> None:
         """
         Initialize echo agent client.
 
@@ -64,6 +64,9 @@ class EchoAgentClient:
                 data = response.json()
                 credentials = RoomCredentials(**data)
 
+                if credentials.daily is None or credentials.livekit is None:
+                    raise ValueError("Both Daily and LiveKit credentials required")
+
                 logger.info("✅ Received room credentials:")
                 logger.info(f"   Daily room: {credentials.daily.room_url}")
                 logger.info(f"   LiveKit room: {credentials.livekit.room_name}")
@@ -75,7 +78,43 @@ class EchoAgentClient:
             raise
         except Exception as e:
             logger.error(f"Error parsing room credentials: {e}")
-            raise ValueError(f"Invalid response from echo agent: {e}")
+            raise ValueError(f"Invalid response from echo agent: {e}") from e
+
+    async def disconnect_room(self, room_id: str) -> bool:
+        """
+        Request disconnection from a room.
+
+        This calls the /disconnect endpoint which triggers the echo agent
+        to disconnect from the specified room and clean up resources.
+
+        Args:
+            room_id: Identifier of the room to disconnect from
+
+        Returns:
+            True if disconnection was successful, False otherwise
+
+        Raises:
+            httpx.HTTPError: If the request fails
+        """
+        logger.info(f"Requesting disconnection from room: {room_id}")
+
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                response = await client.post(
+                    f"{self.base_url}/disconnect", json={"room_id": room_id}
+                )
+                response.raise_for_status()
+
+                data = response.json()
+                logger.info(f"✅ Disconnected from room: {room_id}")
+                return data.get("status") == "success"
+
+        except httpx.HTTPError as e:
+            logger.error(f"Failed to disconnect from room {room_id}: {e}")
+            raise
+        except Exception as e:
+            logger.error(f"Error disconnecting from room {room_id}: {e}")
+            return False
 
 
 async def get_room_credentials(

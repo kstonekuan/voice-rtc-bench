@@ -44,11 +44,11 @@ class EchoAgentClient:
         """
         Request room creation from echo agent.
 
-        This calls the /connect endpoint which creates temporary rooms
-        for both Daily and LiveKit platforms.
+        This calls the /connect endpoint which creates a temporary room
+        for the platform (Daily or LiveKit depending on which agent is running).
 
         Returns:
-            RoomCredentials containing URLs and tokens for both platforms
+            RoomCredentials containing URLs and tokens (either Daily or LiveKit, not both)
 
         Raises:
             httpx.HTTPError: If the request fails
@@ -64,12 +64,15 @@ class EchoAgentClient:
                 data = response.json()
                 credentials = RoomCredentials(**data)
 
-                if credentials.daily is None or credentials.livekit is None:
-                    raise ValueError("Both Daily and LiveKit credentials required")
-
-                logger.info("✅ Received room credentials:")
-                logger.info(f"   Daily room: {credentials.daily.room_url}")
-                logger.info(f"   LiveKit room: {credentials.livekit.room_name}")
+                # Log which platform credentials were received
+                if credentials.daily is not None:
+                    logger.info("✅ Received Daily room credentials:")
+                    logger.info(f"   Daily room: {credentials.daily.room_url}")
+                elif credentials.livekit is not None:
+                    logger.info("✅ Received LiveKit room credentials:")
+                    logger.info(f"   LiveKit room: {credentials.livekit.room_name}")
+                else:
+                    raise ValueError("No credentials received from echo agent")
 
                 return credentials
 

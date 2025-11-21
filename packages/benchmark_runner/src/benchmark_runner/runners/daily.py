@@ -69,12 +69,10 @@ class DailyBenchmarkRunner(EventHandler, BaseBenchmarkRunner):
 
         # Join the room
         logger.info("📞 Joining Daily room...")
+        self.client.set_user_name("benchmark-runner")
         self.client.join(
             self.room_url,
             completion=lambda data, error: self.on_joined(data, error),
-            client_settings={
-                "user_name": "benchmark-runner",
-            },
         )
 
         # Wait for join to complete

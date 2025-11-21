@@ -19,7 +19,7 @@ dependencies = [
 ]
 
 [project.scripts]
-benchmark-runner = "benchmark_runner.cli:main"
+benchmark-runner = "benchmark_runner.main:main"
 
 [build-system]
 requires = ["hatchling"]

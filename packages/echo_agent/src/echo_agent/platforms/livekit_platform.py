@@ -17,7 +17,7 @@ import uvicorn
 from fastapi import FastAPI, HTTPException
 from livekit import api as livekit_api
 from livekit import rtc
-from livekit.agents import AutoSubscribe, JobContext, WorkerOptions, cli
+from livekit.agents import AgentServer, AutoSubscribe, JobContext
 from loguru import logger
 from pydantic import BaseModel
 from shared.settings import EchoAgentSettings
@@ -124,6 +124,20 @@ class LiveKitEchoHandler:
 
         await self.exit_event.wait()
         logger.info(f"👋 [LiveKit] Agent stopped. Total messages: {self.handler.message_count}")
+
+
+# Standalone entrypoint function for LiveKit worker processes
+# This needs to be at module level so it can be pickled for multiprocessing
+async def livekit_worker_entrypoint(ctx: JobContext) -> None:
+    """
+    LiveKit worker entrypoint - handles incoming room connections.
+
+    This function is defined at module level (not as a class method) to ensure
+    it can be properly pickled when using multiprocessing-based job execution.
+    """
+    logger.info(f"[LiveKit] Received job request for room: {ctx.room.name}")
+    agent = LiveKitEchoHandler()
+    await agent.entrypoint(ctx)
 
 
 class LiveKitPlatformHandler(PlatformHandler):
@@ -237,20 +251,27 @@ class LiveKitPlatformHandler(PlatformHandler):
 
         return app
 
-    async def livekit_request_fnc(self, ctx: JobContext) -> None:
-        """Request function for LiveKit agent worker."""
-        logger.info(f"[LiveKit] Received job request for room: {ctx.room.name}")
-        agent = LiveKitEchoHandler()
-        await agent.entrypoint(ctx)
-
-    def run_livekit_worker(self) -> None:
+    async def run_livekit_worker(self) -> None:
         """Run the LiveKit worker."""
         logger.info("🎯 [LiveKit] Worker starting...")
-        cli.run_app(
-            WorkerOptions(
-                entrypoint_fnc=self.livekit_request_fnc,
-            )
+
+        # Create AgentServer directly instead of using from_server_options()
+        # because from_server_options() has a bug where it doesn't pass ws_url
+        server = AgentServer(
+            ws_url=self.settings.livekit.livekit_url,
+            api_key=self.settings.livekit.livekit_api_key,
+            api_secret=self.settings.livekit.livekit_api_secret,
         )
+
+        # Register the standalone entrypoint function (defined at module level)
+        # Using a module-level function instead of a class method allows proper
+        # pickling for multiprocessing-based job execution
+        server.rtc_session(
+            livekit_worker_entrypoint,
+            agent_name="livekit-echo",
+        )
+
+        await server.run()
 
     async def run(self, host: str, port: int) -> None:
         """Start the LiveKit agent and API server."""
@@ -291,11 +312,8 @@ class LiveKitPlatformHandler(PlatformHandler):
         logger.info("📍 Endpoints: POST /connect, POST /disconnect, GET /health, GET /rooms")
 
         # Start LiveKit worker
-        loop = asyncio.get_event_loop()
-        tasks = [loop.run_in_executor(None, self.run_livekit_worker)]
-
         try:
-            await asyncio.gather(*tasks)
+            await self.run_livekit_worker()
         except KeyboardInterrupt:
             logger.info("\n🛑 Shutting down LiveKit agent...")
         except Exception as e:

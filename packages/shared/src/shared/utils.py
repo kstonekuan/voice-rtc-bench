@@ -40,10 +40,17 @@ def setup_logging(
             from rich.console import Console
             from rich.logging import RichHandler
 
-            console = Console()
+            # Create console with force_terminal to ensure proper width detection
+            console = Console(force_terminal=True, width=120)
             # Use rich handler for enhanced output
             logger.add(
-                RichHandler(console=console, rich_tracebacks=True, markup=True),
+                RichHandler(
+                    console=console,
+                    rich_tracebacks=True,
+                    markup=False,  # Disable markup to prevent formatting issues
+                    show_time=False,  # Time already in loguru format
+                    show_path=False,  # Path already in loguru format
+                ),
                 format="{message}",
                 level=level.upper(),
             )

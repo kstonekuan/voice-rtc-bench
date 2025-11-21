@@ -59,8 +59,12 @@ class MessageHandler:
 class DailyEchoHandler(EventHandler):
     """Daily-specific echo handler."""
 
+    def __new__(cls, *args: Any, **kwargs: Any) -> "DailyEchoHandler":
+        """Create a new instance, filtering out kwargs that EventHandler doesn't accept."""
+        return super().__new__(cls)
+
     def __init__(self, room_url: str, agent_name: str = "daily-echo") -> None:
-        super().__init__()
+        EventHandler.__init__(self)
         self.room_url = room_url
         self.agent_name = agent_name
         self.client: CallClient | None = None
@@ -125,7 +129,6 @@ class DailyEchoHandler(EventHandler):
     async def run(self) -> None:
         """Start the Daily echo handler."""
         try:
-            Daily.init()
             logger.info(f"🚀 [Daily] Starting {self.agent_name}...")
 
             self.client = CallClient(event_handler=self)
@@ -140,12 +143,10 @@ class DailyEchoHandler(EventHandler):
             )
 
             logger.info(f"📞 [Daily] Joining room: {self.room_url}")
+            self.client.set_user_name(self.agent_name)
             self.client.join(
                 self.room_url,
                 completion=lambda data, error: self.on_joined(data, error),
-                client_settings={
-                    "user_name": self.agent_name,
-                },
             )
 
             timeout = 10

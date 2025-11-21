@@ -148,37 +148,55 @@ You should see output indicating the server is running on the respective port.
 
 ### Step 3: Run Benchmarks
 
-The benchmark runner automatically requests room credentials from the echo agent:
+The benchmark runner automatically requests room credentials from the echo agent.
+
+**Run Daily benchmark:**
 
 ```bash
-```bash
 # From root directory
-# Run benchmarks on both platforms
-uv run benchmark-runner both \
-  --daily-agent-url "http://localhost:8000" \
-  --livekit-agent-url "http://localhost:8001" \
+uv run benchmark-runner \
+  --platform daily \
+  --agent-url "http://localhost:8000" \
   --iterations 100 \
   --location "us-west-2"
+```
+
+**Run LiveKit benchmark:**
+
+```bash
+uv run benchmark-runner \
+  --platform livekit \
+  --agent-url "http://localhost:8001" \
+  --iterations 100 \
+  --location "us-west-2"
+```
+
+**Run both platforms (sequentially):**
+
+```bash
+# Run Daily
+uv run benchmark-runner --platform daily --agent-url "http://localhost:8000" --location "us-west-2"
+
+# Run LiveKit
+uv run benchmark-runner --platform livekit --agent-url "http://localhost:8001" --location "us-west-2"
 ```
 
 **With InfluxDB integration:**
 
 ```bash
-uv run benchmark-runner both \
-  --daily-agent-url "http://localhost:8000" \
-  --livekit-agent-url "http://localhost:8001" \
-  --location "us-west-2" \
-  --influxdb-url "https://your-instance.timestream-influxdb3.us-east-1.on.aws:8086" \
-  --influxdb-token "your-token" \
-  --influxdb-database "voice-rtc-benchmarks"
+# Results automatically written to InfluxDB if configured in .env
+uv run benchmark-runner \
+  --platform daily \
+  --agent-url "http://localhost:8000" \
+  --location "us-west-2"
 ```
 
 The benchmark runner will:
 1. Request room credentials from the echo agent
-2. Connect to both Daily and LiveKit rooms
+2. Connect to the platform room
 3. Run ping-pong latency tests
-4. Write results to InfluxDB
-5. Echo agents automatically leave when the client disconnects
+4. Write results to InfluxDB (if configured)
+5. Echo agent automatically disconnects when the benchmark completes
 6. Rooms auto-expire after 10 minutes
 
 ### Step 4: View Results in Dashboard

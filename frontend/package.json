@@ -4,13 +4,13 @@
 	"version": "0.0.0",
 	"type": "module",
 	"scripts": {
-		"dev": "vite",
-		"dev:api": "tsx watch server/index.ts",
-		"dev:all": "concurrently \"pnpm dev\" \"pnpm dev:api\"",
+		"dev": "concurrently \"pnpm dev:client\" \"pnpm dev:server\"",
+		"dev:client": "vite",
+		"dev:server": "tsx watch server/index.ts",
 		"build": "tsc -b && vite build",
-		"build:api": "tsc -p tsconfig.server.json",
+		"build:server": "tsc -p tsconfig.server.json",
 		"preview": "vite preview",
-		"start:api": "node dist/server/index.js",
+		"start:server": "node dist/server/index.js",
 		"typecheck": "tsc --noEmit",
 		"lint": "biome check --write .",
 		"check": "pnpm typecheck && pnpm lint"

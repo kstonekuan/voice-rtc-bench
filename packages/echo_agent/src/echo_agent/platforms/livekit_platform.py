@@ -86,7 +86,6 @@ class LiveKitEchoHandler:
                         pong_json.encode("utf-8"),
                         reliable=True,
                     )
-                    logger.debug(f"🏓 [LiveKit] Ping #{self.handler.message_count} -> Pong sent")
             else:
                 logger.debug(f"[LiveKit] Unknown message type: {message_type}")
 
@@ -152,7 +151,7 @@ class LiveKitPlatformHandler(PlatformHandler):
         self.api_thread: threading.Thread | None = None
 
     def create_livekit_token(self, room_name: str, expiry_seconds: int = 600) -> LiveKitRoomInfo:
-        """Generate LiveKit access token for a room."""
+        """Generate LiveKit access token for a room with automatic agent dispatch."""
         expiry_time = time.time() + expiry_seconds
 
         token_obj = livekit_api.AccessToken(
@@ -168,8 +167,19 @@ class LiveKitPlatformHandler(PlatformHandler):
         )
         token_obj.with_ttl(timedelta(seconds=expiry_seconds))
 
+        # Configure automatic agent dispatch when client connects
+        token_obj.with_room_config(
+            livekit_api.RoomConfiguration(
+                agents=[
+                    livekit_api.RoomAgentDispatch(
+                        agent_name="livekit-echo",
+                    )
+                ],
+            )
+        )
+
         token = token_obj.to_jwt()
-        logger.info(f"✅ Generated LiveKit token for room: {room_name}")
+        logger.info(f"✅ Generated LiveKit token for room: {room_name} with agent dispatch")
 
         return LiveKitRoomInfo(
             server_url=self.settings.livekit.livekit_url,

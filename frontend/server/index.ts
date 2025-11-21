@@ -2,12 +2,12 @@
  * API server for serving benchmark results from Amazon Timestream for InfluxDB.
  */
 
+// Load environment variables FIRST (auto-runs config on import)
+import "dotenv/config";
+
 import cors from "cors";
-import dotenv from "dotenv";
 import express from "express";
 import { influxdbRouter } from "./routes/influxdb.js";
-
-dotenv.config();
 
 const app = express();
 const port = Number.parseInt(process.env.API_PORT || "3001", 10);

@@ -59,7 +59,7 @@ class MessageHandler:
 class DailyEchoHandler(EventHandler):
     """Daily-specific echo handler."""
 
-    def __new__(cls, *args: Any, **kwargs: Any) -> "DailyEchoHandler":
+    def __new__(cls, *args: Any, **kwargs: Any) -> "DailyEchoHandler":  # noqa: ANN401
         """Create a new instance, filtering out kwargs that EventHandler doesn't accept."""
         return super().__new__(cls)
 

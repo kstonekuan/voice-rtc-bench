@@ -125,7 +125,7 @@ function App() {
 			<header className="header">
 				<h1 className="header-title">Voice RTC Benchmark Dashboard</h1>
 				<p className="header-subtitle">
-					Real-time Data Channel Latency Metrics: Daily vs LiveKit
+					Real-time Data Channel Latency Metrics: Pipecat (Daily) vs LiveKit
 				</p>
 				{!apiHealthy && (
 					<div className="api-warning">
@@ -171,7 +171,7 @@ function App() {
 							}
 						>
 							<option value="all">Both Platforms</option>
-							<option value="daily">Daily.co Only</option>
+							<option value="daily">Pipecat (Daily) Only</option>
 							<option value="livekit">LiveKit Only</option>
 						</select>
 					</div>
@@ -214,7 +214,7 @@ function App() {
 					{/* Daily Results */}
 					{dailyGroups.length > 0 && (
 						<section className="platform-section">
-							<h2 className="platform-title">Daily.co Results</h2>
+							<h2 className="platform-title">Pipecat (Daily) Results</h2>
 							<div className="benchmark-grid">
 								{dailyGroups.map((group) => (
 									<MetricsCard
@@ -286,7 +286,7 @@ function MetricsCard({
 		<div className={`benchmark-card ${platform}`}>
 			<div className="benchmark-header">
 				<h3 className="benchmark-title">
-					{platform === "daily" ? "Daily.co" : "LiveKit"}
+					{platform === "daily" ? "Pipecat (Daily)" : "LiveKit"}
 				</h3>
 				<div className="location-badge">{location}</div>
 			</div>
@@ -530,7 +530,7 @@ function TimeSeriesChart({
 								type="monotone"
 								dataKey="daily"
 								stroke="#8884d8"
-								name="Daily.co"
+								name="Pipecat (Daily)"
 								strokeWidth={2}
 								dot={{ r: 4 }}
 							/>

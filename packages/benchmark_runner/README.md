@@ -1,113 +1,66 @@
 # Benchmark Runner
 
-Python-based benchmark runner for measuring WebRTC latency across Daily and LiveKit platforms. Designed for distributed deployment to multiple geographic locations.
+Python-based benchmark runner for measuring WebRTC latency across Daily and LiveKit platforms. Part of the [Voice RTC Benchmark](../../README.md) project.
 
-## Features
+> For installation, deployment, and architecture overview, see the [main README](../../README.md).
 
-- **Dual Platform Support**: Benchmark both Daily and LiveKit
-- **Distributed Deployment**: Deploy to multiple regions for comprehensive testing
-- **Amazon Timestream Integration**: Store results in time-series database
-- **CLI Interface**: Easy-to-use command-line tool with rich output
-- **Flexible Configuration**: Environment variables and CLI arguments
-
-## Installation
+## Quick Start
 
 ```bash
-# Using uv (recommended)
-uv sync
+# Benchmark Daily platform
+uv run benchmark-runner --platform daily --agent-url "http://localhost:8000"
 
-# Or using pip
-pip install -e .
+# Benchmark LiveKit platform
+uv run benchmark-runner --platform livekit --agent-url "http://localhost:8001"
 ```
 
-## Usage
+## CLI Reference
 
-### Daily Benchmark
+### Required Arguments
 
+- `--platform {daily,livekit}` - Platform to benchmark
+- `--agent-url URL` - Echo agent API endpoint
+
+### Optional Arguments
+
+- `--iterations N` - Number of ping-pong iterations (default: from `.env`)
+- `--timeout MS` - Timeout in milliseconds (default: from `.env`)
+- `--cooldown MS` - Cooldown between pings in milliseconds (default: from `.env`)
+- `--location ID` - Location identifier (e.g., "us-west-2", "eu-central-1") (default: from `.env`)
+- `--output FILE` - Save results to JSON file
+- `--verbose` - Enable verbose logging
+
+### Examples
+
+**Daily with custom settings:**
 ```bash
-uv run python main.py daily \
-  --room-url "https://your-domain.daily.co/room" \
+uv run benchmark-runner \
+  --platform daily \
+  --agent-url "http://localhost:8000" \
   --iterations 100 \
   --timeout 5000 \
+  --cooldown 100 \
   --location "us-west-2" \
   --output results-daily.json
 ```
 
-### LiveKit Benchmark
-
+**LiveKit with defaults from .env:**
 ```bash
-uv run python main.py livekit \
-  --server-url "wss://your-server.livekit.cloud" \
-  --token "your-access-token" \
-  --iterations 100 \
-  --timeout 5000 \
-  --location "us-west-2" \
-  --output results-livekit.json
-```
-
-### Both Platforms (Parallel)
-
-```bash
-uv run python main.py both \
-  --daily-room "https://your-domain.daily.co/room" \
-  --livekit-url "wss://your-server.livekit.cloud" \
-  --livekit-token "your-token" \
-  --iterations 100 \
-  --location "us-west-2" \
-  --output results-both.json
-```
-
-## CLI Options
-
-### Common Options
-
-- `--iterations, -n`: Number of ping-pong iterations (default: 100)
-- `--timeout, -t`: Timeout in milliseconds (default: 5000)
-- `--cooldown, -c`: Cooldown between pings in ms (default: 100)
-- `--location, -l`: Location identifier (e.g., "us-west-2", "eu-central-1")
-- `--output, -o`: Save results to JSON file
-- `--verbose, -v`: Enable verbose logging
-
-### Daily Command
-
-- `--room-url, -r`: Daily room URL (required)
-
-### LiveKit Command
-
-- `--server-url, -s`: LiveKit server URL (required)
-- `--token, -t`: LiveKit access token (required)
-
-### Both Command
-
-- `--daily-room`: Daily room URL (required)
-- `--livekit-url`: LiveKit server URL (required)
-- `--livekit-token`: LiveKit access token (required)
-
-## Architecture
-
-```
-benchmark-runner/
-├── src/
-│   ├── types.py          # Pydantic models
-│   ├── stats.py          # Statistical calculations
-│   ├── cli.py            # CLI interface
-│   ├── timestream.py     # AWS Timestream integration
-│   └── runners/
-│       ├── daily.py      # Daily benchmark runner
-│       └── livekit.py    # LiveKit benchmark runner
-├── main.py               # Entry point
-└── pyproject.toml        # Dependencies
+uv run benchmark-runner \
+  --platform livekit \
+  --agent-url "http://localhost:8001"
 ```
 
 ## Benchmark Flow
 
-1. **Connect**: Establish WebRTC connection to platform
-2. **Ping**: Send ping message with client timestamp
-3. **Pong**: Receive pong with server timestamps
-4. **Calculate**: Compute RTT and one-way latencies
-5. **Repeat**: Continue for configured iterations
-6. **Analyze**: Calculate statistics (mean, median, P95, P99, jitter)
-7. **Store**: Save results to Timestream (if configured)
+1. **Connect**: Request room credentials from echo agent via `POST /connect`
+2. **Join**: Establish WebRTC connection to the platform
+3. **Ping**: Send ping message with client timestamp
+4. **Pong**: Receive pong with server timestamps
+5. **Calculate**: Compute RTT and one-way latencies
+6. **Repeat**: Continue for configured iterations
+7. **Analyze**: Calculate statistics (mean, median, P95, P99, jitter)
+8. **Store**: Write raw measurements to InfluxDB (if configured)
 
 ## Metrics Collected
 
@@ -118,36 +71,9 @@ benchmark-runner/
 - **Jitter**: Variation in latency (consecutive RTT differences)
 - **Percentiles**: P50, P95, P99 for distribution analysis
 
-## Deployment
-
-### Docker
-
-```dockerfile
-FROM python:3.11-slim
-
-WORKDIR /app
-COPY . .
-
-RUN pip install uv
-RUN uv sync --no-dev
-
-CMD ["uv", "run", "python", "main.py", "both", ...]
-```
-
-### Scheduled Runs (Cron)
-
-```bash
-# Run benchmark every hour
-0 * * * * cd /path/to/benchmark-runner && uv run python main.py both ... >> /var/log/benchmark.log 2>&1
-```
-
-### AWS Lambda
-
-Package with dependencies and trigger on schedule using EventBridge.
-
 ## Output Format
 
-Results are saved in JSON format:
+Results are saved in JSON format when using `--output`:
 
 ```json
 {
@@ -183,12 +109,36 @@ Results are saved in JSON format:
     "iterations": 100,
     "timeout_ms": 5000,
     "platform": "daily",
-    "room_url": "https://...",
-    "location_id": "us-west-2"
+    "location_id": "us-west-2",
+    "run_id": "abc123"
   }
 }
 ```
 
-## Timestream Integration
+## Configuration
 
-See `src/timestream.py` for integration with Amazon Timestream for storing benchmark results across multiple locations and time periods.
+Environment variables (see `.env.example`):
+
+```bash
+# Benchmark Configuration
+ITERATIONS=100
+TIMEOUT_MS=5000
+COOLDOWN_MS=100
+LOCATION_ID=us-west-2
+
+# InfluxDB Configuration (optional - for storing results)
+INFLUXDB_URL=https://your-instance.timestream-influxdb.region.on.aws:8086
+INFLUXDB_TOKEN=your-token
+INFLUXDB_ORG=default
+INFLUXDB_DATABASE=voice-rtc-benchmarks
+```
+
+## InfluxDB Integration
+
+When InfluxDB is configured, the benchmark runner automatically:
+
+1. Writes each individual measurement with a unique `run_id`
+2. Includes all metadata (platform, location, timestamps)
+3. Enables time-series analysis and aggregation in the dashboard
+
+See the main README for InfluxDB setup instructions.

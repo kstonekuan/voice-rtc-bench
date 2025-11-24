@@ -5,6 +5,7 @@ This module contains common Pydantic models used across the benchmark runner
 and echo agent packages.
 """
 
+import uuid
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -97,6 +98,7 @@ class BenchmarkMetadata(BaseModel):
     platform: str
     room_url: str | None = None
     location_id: str | None = Field(default=None, description="Deployment location identifier")
+    run_id: str = Field(default_factory=lambda: str(uuid.uuid4()), description="Unique identifier for this benchmark run")
 
 
 class BenchmarkResult(BaseModel):

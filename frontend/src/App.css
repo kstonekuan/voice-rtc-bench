@@ -100,10 +100,7 @@ body::after {
 	letter-spacing: -0.02em;
 	margin-bottom: 0.5rem;
 	text-transform: uppercase;
-	background: linear-gradient(135deg, var(--color-daily), var(--color-livekit));
-	-webkit-background-clip: text;
-	-webkit-text-fill-color: transparent;
-	background-clip: text;
+	color: var(--color-text);
 }
 
 .header-subtitle {
@@ -157,6 +154,45 @@ body::after {
 	outline: none;
 	border-color: var(--color-text);
 	box-shadow: 0 0 0 1px var(--color-text);
+}
+
+/* View Toggle */
+.view-toggle {
+	display: flex;
+	gap: 0;
+	border: 1px solid var(--color-border);
+	overflow: hidden;
+}
+
+.view-toggle-btn {
+	flex: 1;
+	background: var(--color-bg);
+	border: none;
+	border-right: 1px solid var(--color-border);
+	color: var(--color-text-dim);
+	padding: 0.75rem 1rem;
+	font-family: var(--font-mono);
+	font-size: 0.875rem;
+	text-transform: uppercase;
+	letter-spacing: 0.05em;
+	cursor: pointer;
+	transition: all 0.2s ease;
+	font-weight: 500;
+}
+
+.view-toggle-btn:last-child {
+	border-right: none;
+}
+
+.view-toggle-btn:hover {
+	background: var(--color-surface);
+	color: var(--color-text);
+}
+
+.view-toggle-btn.active {
+	background: var(--color-text);
+	color: var(--color-bg);
+	font-weight: 700;
 }
 
 .button-group {

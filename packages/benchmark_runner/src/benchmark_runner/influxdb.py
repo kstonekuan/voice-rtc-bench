@@ -41,6 +41,7 @@ class InfluxDBClientWrapper:
     def write_benchmark_result(self, result: BenchmarkResult) -> bool:
         """
         Write benchmark result to InfluxDB.
+        Writes both individual measurements and a run summary with packet loss stats.
 
         Args:
             result: BenchmarkResult to store
@@ -49,76 +50,111 @@ class InfluxDBClientWrapper:
             True if successful, False otherwise
         """
         try:
-            points = self._create_points_from_statistics(
+            # Create points for individual measurements
+            measurement_points = self._create_points_from_measurements(
+                result.measurements,
+                platform=result.platform,
+                location_id=result.metadata.location_id or "unknown",
+                run_id=result.metadata.run_id,
+            )
+
+            # Create a single summary point for this run with aggregated stats
+            summary_point = self._create_run_summary_point(
                 result.statistics,
                 platform=result.platform,
                 location_id=result.metadata.location_id or "unknown",
+                run_id=result.metadata.run_id,
+                timestamp=datetime.fromtimestamp(result.metadata.end_time),
             )
 
             # Batch write all points in a single operation
-            self.client.write(points)
+            all_points = measurement_points + [summary_point]
+            self.client.write(all_points)
 
-            logger.info(f"✅ Wrote {len(points)} points to InfluxDB (batched)")
+            logger.info(
+                f"✅ Wrote {len(measurement_points)} measurements + 1 run summary to InfluxDB with run_id={result.metadata.run_id}"
+            )
             return True
 
         except Exception as e:
             logger.error(f"Failed to write to InfluxDB: {e}", exc_info=True)
             return False
 
-    def _create_points_from_statistics(
+    def _create_points_from_measurements(
         self,
-        stats: BenchmarkStatistics,
+        measurements: list,
         platform: str,
         location_id: str,
+        run_id: str,
     ) -> list[Point]:
         """
-        Create InfluxDB points from statistics.
+        Create InfluxDB points from raw measurements.
 
         Args:
-            stats: BenchmarkStatistics to convert
+            measurements: List of LatencyMeasurement objects
             platform: Platform name (daily/livekit)
             location_id: Location identifier
+            run_id: Unique identifier for this benchmark run
 
         Returns:
-            List of InfluxDB Point objects
+            List of InfluxDB Point objects (one per measurement)
         """
-        # Define all metrics to be written as points
-        # Each metric maps to a field name and the corresponding attribute on stats
-        metric_definitions = [
-            # Message count metrics
-            ("total_messages", stats.total_messages),
-            ("successful_messages", stats.successful_messages),
-            ("failed_messages", stats.failed_messages),
-            # RTT metrics
-            ("mean_rtt", stats.mean_rtt),
-            ("median_rtt", stats.median_rtt),
-            ("min_rtt", stats.min_rtt),
-            ("max_rtt", stats.max_rtt),
-            ("std_dev_rtt", stats.std_dev_rtt),
-            # Percentiles
-            ("p50_rtt", stats.p50_rtt),
-            ("p95_rtt", stats.p95_rtt),
-            ("p99_rtt", stats.p99_rtt),
-            # Jitter and packet loss
-            ("jitter", stats.jitter),
-            ("packet_loss_rate", stats.packet_loss_rate),
-        ]
-
-        timestamp = datetime.now()
         points = []
 
-        # Create one point per metric
-        for field_name, field_value in metric_definitions:
+        # Create one point per measurement, all tagged with the same run_id
+        for measurement in measurements:
+            # Use the measurement's timestamp for time-series accuracy
+            # Convert from milliseconds to datetime
+            timestamp = datetime.fromtimestamp(measurement.timestamp / 1000)
+
             point = (
                 Point("latency_measurements")
                 .tag("platform", platform)
                 .tag("location_id", location_id)
-                .field(field_name, field_value)
+                .tag("run_id", run_id)
+                .field("round_trip_time", measurement.round_trip_time)
+                .field("client_to_server", measurement.client_to_server)
+                .field("server_to_client", measurement.server_to_client)
+                .field("message_number", measurement.message_number)
                 .time(timestamp)
             )
             points.append(point)
 
         return points
+
+    def _create_run_summary_point(
+        self,
+        stats: BenchmarkStatistics,
+        platform: str,
+        location_id: str,
+        run_id: str,
+        timestamp: datetime,
+    ) -> Point:
+        """
+        Create a single summary point for a benchmark run.
+        Contains aggregated statistics including packet loss rate.
+
+        Args:
+            stats: BenchmarkStatistics object
+            platform: Platform name (daily/livekit)
+            location_id: Location identifier
+            run_id: Unique identifier for this benchmark run
+            timestamp: Timestamp for the summary point
+
+        Returns:
+            InfluxDB Point object with run summary
+        """
+        return (
+            Point("run_summary")
+            .tag("platform", platform)
+            .tag("location_id", location_id)
+            .tag("run_id", run_id)
+            .field("total_messages", stats.total_messages)
+            .field("successful_messages", stats.successful_messages)
+            .field("failed_messages", stats.failed_messages)
+            .field("packet_loss_rate", stats.packet_loss_rate)
+            .time(timestamp)
+        )
 
     def query_results(
         self,

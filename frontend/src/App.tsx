@@ -10,6 +10,7 @@ import {
 	XAxis,
 	YAxis,
 } from "recharts";
+import { WorldMap } from "./components/WorldMap";
 import {
 	type AggregatedMetric,
 	apiClient,
@@ -31,6 +32,7 @@ function App() {
 	const [loading, setLoading] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 	const [apiHealthy, setApiHealthy] = useState(false);
+	const [viewMode, setViewMode] = useState<"map" | "grid">("map");
 
 	// Check API health on mount
 	useEffect(() => {
@@ -192,6 +194,28 @@ function App() {
 							<option value={168}>Last Week</option>
 						</select>
 					</div>
+
+					<div className="control-group">
+						<label htmlFor="view-mode" className="control-label">
+							View Mode
+						</label>
+						<div className="view-toggle">
+							<button
+								type="button"
+								className={`view-toggle-btn ${viewMode === "map" ? "active" : ""}`}
+								onClick={() => setViewMode("map")}
+							>
+								Map
+							</button>
+							<button
+								type="button"
+								className={`view-toggle-btn ${viewMode === "grid" ? "active" : ""}`}
+								onClick={() => setViewMode("grid")}
+							>
+								Grid
+							</button>
+						</div>
+					</div>
 				</div>
 			</section>
 
@@ -199,7 +223,7 @@ function App() {
 			{loading && <div className="loading-message">Loading metrics...</div>}
 			{error && <div className="error-message">{error}</div>}
 
-			{/* Results Grid */}
+			{/* Empty State */}
 			{!loading && !error && groups.length === 0 && (
 				<div className="empty-state">
 					<p>No benchmark data available for the selected filters.</p>
@@ -209,55 +233,68 @@ function App() {
 				</div>
 			)}
 
+			{/* Results */}
 			{!loading && !error && groups.length > 0 && (
 				<>
-					{/* Daily Results */}
-					{dailyGroups.length > 0 && (
-						<section className="platform-section">
-							<h2 className="platform-title">Pipecat (Daily) Results</h2>
-							<div className="benchmark-grid">
-								{dailyGroups.map((group) => (
-									<MetricsCard
-										key={`daily-${group.location}`}
-										platform="daily"
-										location={group.location}
-										metrics={group.metrics}
-									/>
-								))}
-							</div>
-						</section>
+					{/* Map View */}
+					{viewMode === "map" && (
+						<>
+							<WorldMap metrics={metrics} />
+
+							{/* Time Series Chart - shown below map */}
+							{timeSeriesData.length > 0 && (
+								<TimeSeriesChart
+									data={timeSeriesData}
+									selectedPlatform={selectedPlatform}
+								/>
+							)}
+						</>
 					)}
 
-					{/* LiveKit Results */}
-					{livekitGroups.length > 0 && (
-						<section className="platform-section">
-							<h2 className="platform-title">LiveKit Results</h2>
-							<div className="benchmark-grid">
-								{livekitGroups.map((group) => (
-									<MetricsCard
-										key={`livekit-${group.location}`}
-										platform="livekit"
-										location={group.location}
-										metrics={group.metrics}
-									/>
-								))}
-							</div>
-						</section>
+					{/* Grid View */}
+					{viewMode === "grid" && (
+						<>
+							{/* Daily Results */}
+							{dailyGroups.length > 0 && (
+								<section className="platform-section">
+									<h2 className="platform-title">Pipecat (Daily) Results</h2>
+									<div className="benchmark-grid">
+										{dailyGroups.map((group) => (
+											<MetricsCard
+												key={`daily-${group.location}`}
+												platform="daily"
+												location={group.location}
+												metrics={group.metrics}
+											/>
+										))}
+									</div>
+								</section>
+							)}
+
+							{/* LiveKit Results */}
+							{livekitGroups.length > 0 && (
+								<section className="platform-section">
+									<h2 className="platform-title">LiveKit Results</h2>
+									<div className="benchmark-grid">
+										{livekitGroups.map((group) => (
+											<MetricsCard
+												key={`livekit-${group.location}`}
+												platform="livekit"
+												location={group.location}
+												metrics={group.metrics}
+											/>
+										))}
+									</div>
+								</section>
+							)}
+						</>
 					)}
 
-					{/* Comparison Section */}
+					{/* Comparison Section - shown in both views */}
 					{dailyGroups.length > 0 && livekitGroups.length > 0 && (
 						<ComparisonSection
 							dailyGroups={dailyGroups}
 							livekitGroups={livekitGroups}
-						/>
-					)}
-
-					{/* Time Series Chart */}
-					{timeSeriesData.length > 0 && (
-						<TimeSeriesChart
-							data={timeSeriesData}
-							selectedPlatform={selectedPlatform}
 						/>
 					)}
 				</>
@@ -436,12 +473,42 @@ function ComparisonSection({
 							<div className="comparison-values">
 								<span className="comparison-value daily">
 									{comp.daily.toFixed(2)}ms
-									{dailyWins && <span className="winner-badge">Faster</span>}
+									{dailyWins && (
+										<span className="winner-badge">
+											<svg
+												width="12"
+												height="12"
+												viewBox="0 0 24 24"
+												fill="currentColor"
+												style={{
+													display: "inline-block",
+													verticalAlign: "middle",
+												}}
+											>
+												<path d="M12 2l2.4 7.4h7.6l-6 4.6 2.3 7-6.3-4.6-6.3 4.6 2.3-7-6-4.6h7.6z" />
+											</svg>
+										</span>
+									)}
 								</span>
 								<span className="comparison-separator">vs</span>
 								<span className="comparison-value livekit">
 									{comp.livekit.toFixed(2)}ms
-									{livekitWins && <span className="winner-badge">Faster</span>}
+									{livekitWins && (
+										<span className="winner-badge">
+											<svg
+												width="12"
+												height="12"
+												viewBox="0 0 24 24"
+												fill="currentColor"
+												style={{
+													display: "inline-block",
+													verticalAlign: "middle",
+												}}
+											>
+												<path d="M12 2l2.4 7.4h7.6l-6 4.6 2.3 7-6.3-4.6-6.3 4.6 2.3-7-6-4.6h7.6z" />
+											</svg>
+										</span>
+									)}
 								</span>
 							</div>
 						</div>
@@ -529,7 +596,7 @@ function TimeSeriesChart({
 							<Line
 								type="monotone"
 								dataKey="daily"
-								stroke="#8884d8"
+								stroke="#00d4ff"
 								name="Pipecat (Daily)"
 								strokeWidth={2}
 								dot={{ r: 4 }}
@@ -539,7 +606,7 @@ function TimeSeriesChart({
 							<Line
 								type="monotone"
 								dataKey="livekit"
-								stroke="#82ca9d"
+								stroke="#00ff88"
 								name="LiveKit"
 								strokeWidth={2}
 								dot={{ r: 4 }}

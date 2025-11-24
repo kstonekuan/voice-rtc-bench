@@ -1,81 +1,60 @@
 # Echo Agent
 
-FastAPI-powered echo agent with on-demand room creation for Daily and LiveKit platforms.
+FastAPI-powered echo agent with on-demand room creation for Daily and LiveKit platforms. Part of the [Voice RTC Benchmark](../../README.md) project.
 
-## Features
+> For installation, deployment, and architecture overview, see the [main README](../../README.md).
 
-- **On-Demand Room Creation**: Creates temporary rooms via REST API
-- **Dual Platform Support**: Handles both Daily and LiveKit simultaneously
-- **Pipecat-Style Architecture**: HTTP API for benchmark orchestration
-- **Auto-Cleanup**: Echo agents leave when clients disconnect, rooms auto-expire
-- **Production Ready**: FastAPI server, error handling, and logging
-
-## Installation
+## Quick Start
 
 ```bash
-# Install using uv (recommended)
-uv sync
+# Start Daily echo agent (default port 8000)
+uv run python main.py --platform daily
 
-# Or using pip
-pip install -e .
+# Start LiveKit echo agent (default port 8001)
+uv run python main.py --platform livekit
+
+# Custom port
+uv run python main.py --platform daily --port 9000
 ```
-
-## Configuration
-
-Create a `.env` file (copy from `.env.example`):
-
-```bash
-# API Server Configuration
-API_HOST=0.0.0.0
-API_PORT=8080
-
-# Daily API Key (for creating rooms)
-DAILY_API_KEY=your-daily-api-key-here
-
-# LiveKit Configuration
-LIVEKIT_URL=wss://your-project.livekit.cloud
-LIVEKIT_API_KEY=your-api-key
-LIVEKIT_API_SECRET=your-api-secret
-
-# Optional: Logging
-LOG_LEVEL=INFO
-```
-
-## Usage
-
-```bash
-# Start the echo agent
-uv run python main.py
-```
-
-The agent will:
-1. Start FastAPI server on port 8080
-2. Expose `/connect` endpoint for room creation
-3. Create Daily rooms and LiveKit tokens on-demand
-4. Join Daily rooms dynamically when requested
-5. Handle LiveKit rooms via worker pattern
-6. Respond to ping messages on both platforms
-7. Automatically leave rooms when the last client disconnects
 
 ## API Endpoints
 
 ### `POST /connect`
 
-Creates temporary rooms for both platforms and returns credentials.
+Creates temporary rooms for the specified platform and returns credentials.
 
-**Response:**
+**Response (Daily):**
 ```json
 {
   "daily": {
     "room_url": "https://domain.daily.co/benchmark-1234567890",
     "expires_at": 1234567890.0
   },
+  "livekit": null
+}
+```
+
+**Response (LiveKit):**
+```json
+{
+  "daily": null,
   "livekit": {
     "server_url": "wss://project.livekit.cloud",
     "room_name": "benchmark-1234567890",
     "token": "eyJhbGc...",
     "expires_at": 1234567890.0
   }
+}
+```
+
+### `POST /disconnect`
+
+Disconnects from a specific room.
+
+**Request:**
+```json
+{
+  "room_name": "benchmark-1234567890"
 }
 ```
 
@@ -101,15 +80,19 @@ Lists currently active rooms.
 - Creates rooms via REST API using pipecat's DailyRESTHelper
 - Rooms auto-expire in 10 minutes
 - Agent joins rooms on-demand when created
-- Uses Daily's app-message API for ping-pong
+- Uses Daily's app-message API for ping-pong protocol
+- Default port: **8000**
 
 ### LiveKit
 - Generates access tokens with room grants
 - Rooms auto-create when first participant joins
 - Worker handles all rooms dynamically
-- Uses WebRTC data channels for ping-pong
+- Uses WebRTC data channels for ping-pong protocol
+- Default port: **8001**
 
 ## Message Format
+
+The echo agent implements a ping-pong protocol for latency measurement:
 
 **Ping (Client → Agent):**
 ```json
@@ -130,60 +113,24 @@ Lists currently active rooms.
 }
 ```
 
-## Deployment
+The timestamps allow the client to calculate:
+- **Round-trip latency**: `(now - client_timestamp)`
+- **One-way latency estimate**: `(server_receive_time - client_timestamp)`
+- **Server processing time**: `(server_send_time - server_receive_time)`
 
-Deploy to any cloud platform supporting Python applications:
+## Configuration
+
+Environment variables (see `.env.example`):
 
 ```bash
-# Using Docker
-docker build -t echo-agent .
-docker run --env-file .env -p 8080:8080 echo-agent
+# Daily API Key (for creating rooms)
+DAILY_API_KEY=your-daily-api-key-here
 
-# Using uv in production
-uv run --no-dev python main.py
+# LiveKit Configuration
+LIVEKIT_URL=wss://your-project.livekit.cloud
+LIVEKIT_API_KEY=your-api-key
+LIVEKIT_API_SECRET=your-api-secret
 
-# Fly.io
-fly launch
-fly secrets set DAILY_API_KEY="..." LIVEKIT_URL="..." LIVEKIT_API_KEY="..." LIVEKIT_API_SECRET="..."
-fly deploy
-```
-
-## Architecture
-
-```
-┌───────────────────────────────────────────────┐
-│           Echo Agent (Cloud)                  │
-│                                               │
-│  ┌─────────────────────────────────────────┐ │
-│  │  FastAPI Server (Port 8080)             │ │
-│  │  • POST /connect (create rooms)         │ │
-│  │  • GET /health                          │ │
-│  │  • GET /rooms                           │ │
-│  └──────────────┬──────────────────────────┘ │
-│                 │                             │
-│                 ▼                             │
-│  ┌──────────────────────────────────────┐    │
-│  │  Room Creation & Management          │    │
-│  │  • DailyRESTHelper (pipecat)         │    │
-│  │  • LiveKit token generation          │    │
-│  └──────────┬────────────┬──────────────┘    │
-│             │            │                    │
-│             ▼            ▼                    │
-│  ┌─────────────┐  ┌─────────────┐            │
-│  │ Daily       │  │ LiveKit     │            │
-│  │ Handler     │  │ Worker      │            │
-│  │             │  │             │            │
-│  │ • Dynamic   │  │ • Always    │            │
-│  │   room join │  │   ready     │            │
-│  │ • App msgs  │  │ • Data ch.  │            │
-│  └──────┬──────┘  └──────┬──────┘            │
-│         │                │                    │
-│         └───────┬────────┘                    │
-│                 ▼                             │
-│         ┌───────────────┐                     │
-│         │ Message       │                     │
-│         │ Handler       │                     │
-│         │ (Shared)      │                     │
-│         └───────────────┘                     │
-└───────────────────────────────────────────────┘
+# Optional
+LOG_LEVEL=INFO  # DEBUG, INFO, WARNING, ERROR
 ```

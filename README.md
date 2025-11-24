@@ -2,6 +2,9 @@
 
 A distributed benchmarking system for comparing WebRTC voice AI platforms (Daily vs LiveKit) across multiple geographic locations and time periods.
 
+![Dashboard Preview](dashboard-preview.png)
+*Dashboard preview showing mock data*
+
 ## Overview
 
 This project measures the **network transport baseline latency** of Daily.co and LiveKit by sending ping-pong messages through WebRTC data channels. Results are aggregated in Amazon Timestream for InfluxDB and visualized in a real-time dashboard.
@@ -90,13 +93,14 @@ voice-rtc-bench/
 
 ### How It Works
 
+1. **Echo Agents** run as separate HTTP API servers (one for Daily, one for LiveKit)
 2. **Benchmark Runners** (scheduled or manual) call `POST /connect` API endpoint on the respective agent
 3. **Echo Agents** create temporary rooms and return credentials
-4. **Benchmark Runners** connect to rooms and run ping-pong latency tests
-5. **Results** are written to Amazon Timestream for InfluxDB for time-series storage
+4. **Benchmark Runners** connect to rooms and run ping-pong latency tests (100 pings per run)
+5. **Results** are written to Amazon Timestream for InfluxDB with a unique `run_id` per benchmark run
 6. **Echo agents automatically leave** the room when the benchmark client disconnects
 7. **Rooms auto-expire** after 10 minutes (Daily) or when empty (LiveKit)
-8. **Dashboard** queries InfluxDB and visualizes metrics with filters
+8. **Dashboard** queries InfluxDB, aggregates by `run_id`, and visualizes metrics with filters
 
 ## Quick Start
 
@@ -148,7 +152,7 @@ You should see output indicating the server is running on the respective port.
 
 ### Step 3: Run Benchmarks
 
-The benchmark runner automatically requests room credentials from the echo agent.
+The benchmark runner automatically requests room credentials from the echo agent and writes results to InfluxDB if configured in `.env`.
 
 **Run Daily benchmark:**
 
@@ -164,6 +168,7 @@ uv run benchmark-runner \
 **Run LiveKit benchmark:**
 
 ```bash
+# From root directory
 uv run benchmark-runner \
   --platform livekit \
   --agent-url "http://localhost:8001" \
@@ -171,33 +176,49 @@ uv run benchmark-runner \
   --location "us-west-2"
 ```
 
-**Run both platforms (sequentially):**
+**Run both platforms sequentially:**
 
 ```bash
-# Run Daily
+# Run Daily first
 uv run benchmark-runner --platform daily --agent-url "http://localhost:8000" --location "us-west-2"
 
-# Run LiveKit
+# Then run LiveKit
 uv run benchmark-runner --platform livekit --agent-url "http://localhost:8001" --location "us-west-2"
 ```
 
-**With InfluxDB integration:**
+**Additional options:**
 
 ```bash
-# Results automatically written to InfluxDB if configured in .env
+# Customize iterations, timeout, and cooldown
 uv run benchmark-runner \
   --platform daily \
   --agent-url "http://localhost:8000" \
+  --iterations 50 \
+  --timeout 3000 \
+  --cooldown 200 \
   --location "us-west-2"
+
+# Save results to JSON file
+uv run benchmark-runner \
+  --platform daily \
+  --agent-url "http://localhost:8000" \
+  --output results.json
+
+# Enable verbose logging
+uv run benchmark-runner \
+  --platform daily \
+  --agent-url "http://localhost:8000" \
+  --verbose
 ```
 
 The benchmark runner will:
-1. Request room credentials from the echo agent
-2. Connect to the platform room
-3. Run ping-pong latency tests
-4. Write results to InfluxDB (if configured)
-5. Echo agent automatically disconnects when the benchmark completes
-6. Rooms auto-expire after 10 minutes
+1. Request room credentials from the echo agent API
+2. Connect to the platform-specific WebRTC room
+3. Send 100 ping messages and measure round-trip times
+4. Calculate statistics (mean, median, P95, P99, jitter, packet loss)
+5. Write individual measurements to InfluxDB with a unique `run_id` (if configured)
+6. Echo agent automatically disconnects when the benchmark completes
+7. Rooms auto-expire after 10 minutes
 
 ### Step 4: View Results in Dashboard
 
@@ -207,7 +228,7 @@ cd frontend
 pnpm install
 cp .env.example .env
 # Edit .env and add InfluxDB credentials
-pnpm dev:api
+pnpm dev:server
 ```
 
 **Terminal 2 - Frontend:**
@@ -264,8 +285,11 @@ Deploy to multiple locations using:
 
 **Cron Jobs:**
 ```bash
-# Run every hour from root directory
-0 * * * * cd /path/to/voice-rtc-bench && uv run benchmark-runner both ... --location "us-west-2"
+# Run Daily benchmark every hour
+0 * * * * cd /path/to/voice-rtc-bench && uv run benchmark-runner --platform daily --agent-url "https://your-daily-agent.fly.dev" --location "us-west-2"
+
+# Run LiveKit benchmark every hour (offset by 30 minutes)
+30 * * * * cd /path/to/voice-rtc-bench && uv run benchmark-runner --platform livekit --agent-url "https://your-livekit-agent.fly.dev" --location "us-west-2"
 ```
 
 **Docker:**
@@ -274,7 +298,9 @@ FROM python:3.11-slim
 WORKDIR /app
 COPY . .
 RUN pip install uv && uv sync --all-packages
-CMD ["uv", "run", "benchmark-runner", "both", ...]
+
+# Run benchmark on container start
+CMD ["uv", "run", "benchmark-runner", "--platform", "daily", "--agent-url", "http://daily-agent:8000", "--location", "us-west-2"]
 ```
 
 ### Frontend + API
@@ -320,6 +346,30 @@ pnpm build:api
 
 This provides the **infrastructure baseline** for voice AI applications.
 
+### Data Model & Storage
+
+Each benchmark run generates:
+- **100 individual ping measurements** (configurable via `--iterations`)
+- Each measurement is written to InfluxDB with a shared `run_id` tag
+- All measurements from a single run share the same `run_id` (UUID)
+
+**InfluxDB Schema:**
+```
+Measurement: latency_measurements
+Tags: platform, location_id, run_id
+Fields: round_trip_time, client_to_server, server_to_client, message_number
+Time: measurement timestamp
+```
+
+**Time-Series Visualization:**
+- The dashboard aggregates measurements by `run_id`
+- Each data point on the graph = average of ~100 pings from a single benchmark run
+- This provides clean, meaningful trends over time rather than showing individual pings
+
+**Example:** Running 10 benchmarks creates:
+- 1000 individual measurements in InfluxDB (10 runs × 100 pings)
+- 10 data points in the time-series chart (1 per run, averaged)
+
 ## Results Interpretation
 
 ### What Makes a Good Result?
@@ -337,60 +387,45 @@ The dashboard shows which platform has lower latency for each metric across loca
 
 ## CLI Reference
 
-### Daily Benchmark
+### Benchmark Runner
 
 ```bash
 # Run from root directory
-uv run benchmark-runner daily \
-  --room-url URL \           # Daily room URL (required)
-  --iterations N \           # Number of pings (default: 100)
-  --timeout MS \             # Timeout in ms (default: 5000)
-  --cooldown MS \            # Cooldown between pings (default: 100)
-  --location ID \            # Location identifier (optional)
-  --output FILE \            # Save JSON results (optional)
-  --influxdb-url URL \       # InfluxDB endpoint URL (optional)
-  --influxdb-token TOKEN \   # InfluxDB auth token (optional)
-  --influxdb-org ORG \       # InfluxDB organization (optional)
-  --influxdb-database NAME \ # InfluxDB database (optional)
-  --verbose                  # Enable debug logging
+uv run benchmark-runner \
+  --platform {daily,livekit} \  # Platform to benchmark (required)
+  --agent-url URL \             # Echo agent API URL (required)
+  --iterations N \              # Number of pings (default: 100 or from .env)
+  --timeout MS \                # Timeout in ms (default: 5000 or from .env)
+  --cooldown MS \               # Cooldown between pings in ms (default: 100 or from .env)
+  --location ID \               # Location identifier (default: from .env)
+  --output FILE \               # Save JSON results to file (optional)
+  --verbose                     # Enable debug logging (optional)
 ```
 
-### LiveKit Benchmark
+**Configuration:**
+- InfluxDB settings (URL, token, org, database) are configured via `.env` file only
+- Platform credentials (Daily API key, LiveKit credentials) are configured in `.env`
+- CLI flags override `.env` values for iterations, timeout, cooldown, and location
+
+**Examples:**
 
 ```bash
-# Run from root directory
-uv run benchmark-runner livekit \
-  --server-url URL \         # LiveKit server URL (required)
-  --token TOKEN \            # Access token (required)
-  --iterations N \           # Number of pings (default: 100)
-  --timeout MS \             # Timeout in ms (default: 5000)
-  --cooldown MS \            # Cooldown between pings (default: 100)
-  --location ID \            # Location identifier (optional)
-  --output FILE \            # Save JSON results (optional)
-  --influxdb-url URL \       # InfluxDB endpoint URL (optional)
-  --influxdb-token TOKEN \   # InfluxDB auth token (optional)
-  --influxdb-org ORG \       # InfluxDB organization (optional)
-  --influxdb-database NAME \ # InfluxDB database (optional)
-  --verbose                  # Enable debug logging
-```
+# Basic benchmark with defaults from .env
+uv run benchmark-runner --platform daily --agent-url "http://localhost:8000"
 
-### Both Platforms (Parallel)
+# Override iterations and location
+uv run benchmark-runner \
+  --platform livekit \
+  --agent-url "http://localhost:8001" \
+  --iterations 50 \
+  --location "eu-central-1"
 
-```bash
-# Run from root directory
-uv run benchmark-runner both \
-  --daily-agent-url URL \    # Daily Agent API URL (optional)
-  --livekit-agent-url URL \  # LiveKit Agent API URL (optional)
-  --iterations N \           # Number of pings (default: 100)
-  --timeout MS \             # Timeout in ms (default: 5000)
-  --cooldown MS \            # Cooldown between pings (default: 100)
-  --location ID \            # Location identifier (optional)
-  --output FILE \            # Save JSON results (optional)
-  --influxdb-url URL \       # InfluxDB endpoint URL (optional)
-  --influxdb-token TOKEN \   # InfluxDB auth token (optional)
-  --influxdb-org ORG \       # InfluxDB organization (optional)
-  --influxdb-database NAME \ # InfluxDB database (optional)
-  --verbose                  # Enable debug logging
+# Save results to file with verbose logging
+uv run benchmark-runner \
+  --platform daily \
+  --agent-url "http://localhost:8000" \
+  --output results.json \
+  --verbose
 ```
 
 ## API Reference

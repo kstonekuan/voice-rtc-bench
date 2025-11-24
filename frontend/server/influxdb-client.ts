@@ -22,17 +22,6 @@ function escapeSQLString(value: string): string {
 	return value.replace(/'/g, "''");
 }
 
-/**
- * Safely validate and use SQL identifier (column/table names).
- * Only allows alphanumeric and underscore characters.
- */
-function validateSQLIdentifier(identifier: string): string {
-	if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(identifier)) {
-		throw new Error(`Invalid SQL identifier: ${identifier}`);
-	}
-	return identifier;
-}
-
 export interface AggregatedMetric {
 	platform: string;
 	location_id: string;
@@ -67,8 +56,8 @@ export class InfluxDBClientWrapper {
 
 	/**
 	 * Query aggregated statistics over a time period.
+	 * Calculates statistics from raw measurement data.
 	 * Parameters are validated to prevent SQL injection.
-	 * Runs all metric queries in parallel for better performance.
 	 */
 	async queryAggregatedStats(params: {
 		platform?: Platform;
@@ -77,93 +66,217 @@ export class InfluxDBClientWrapper {
 	}): Promise<AggregatedMetric[]> {
 		const { platform, location_id, hours_ago = 24 } = params;
 
-		// Use validated metrics from the allowlist
-		const metrics: readonly MetricName[] = [
-			"mean_rtt",
-			"median_rtt",
-			"p50_rtt",
-			"p95_rtt",
-			"p99_rtt",
-			"min_rtt",
-			"max_rtt",
-			"jitter",
-			"packet_loss_rate",
-		];
+		// Build query with jitter and packet loss calculation
+		// Jitter is calculated per run from measurements, then averaged
+		// Packet loss is averaged from run_summary table
+		let query = `
+      WITH run_jitter AS (
+        SELECT
+          run_id,
+          platform,
+          location_id,
+          AVG(ABS(round_trip_time - LAG(round_trip_time) OVER (PARTITION BY run_id ORDER BY time))) as run_jitter_value
+        FROM latency_measurements
+        WHERE time >= now() - INTERVAL '${Number(hours_ago)} hours'
+          AND round_trip_time IS NOT NULL
+    `;
 
-		// Build query function for a single metric
-		const queryMetric = async (
-			metric: MetricName,
-		): Promise<AggregatedMetric[]> => {
-			const results: AggregatedMetric[] = [];
+		// Add optional filters with escaped values
+		if (platform) {
+			query += ` AND platform = '${escapeSQLString(platform)}'`;
+		}
 
-			// Validate metric name against allowlist
-			const safeMetric = validateSQLIdentifier(metric);
+		if (location_id) {
+			query += ` AND location_id = '${escapeSQLString(location_id)}'`;
+		}
 
-			// Build query with safe parameter interpolation
-			// Aggregate all data within the time range into a single value per platform/location
-			let query = `
+		query += `
+        GROUP BY run_id, platform, location_id
+      ),
+      run_stats AS (
         SELECT
           platform,
           location_id,
-          '${escapeSQLString(metric)}' as metric_name,
-          AVG(${safeMetric}) as avg_value,
-          MIN(${safeMetric}) as min_value,
-          MAX(${safeMetric}) as max_value,
-          COUNT(${safeMetric}) as sample_count,
-          MAX(time) as time_period
-        FROM latency_measurements
+          AVG(packet_loss_rate) as avg_packet_loss,
+          SUM(total_messages) as total_messages_sum,
+          SUM(successful_messages) as successful_messages_sum,
+          SUM(failed_messages) as failed_messages_sum
+        FROM run_summary
         WHERE time >= now() - INTERVAL '${Number(hours_ago)} hours'
-          AND ${safeMetric} IS NOT NULL
-      `;
+    `;
 
-			// Add optional filters with escaped values
-			if (platform) {
-				query += ` AND platform = '${escapeSQLString(platform)}'`;
-			}
+		// Add optional filters for run_stats
+		if (platform) {
+			query += ` AND platform = '${escapeSQLString(platform)}'`;
+		}
 
-			if (location_id) {
-				query += ` AND location_id = '${escapeSQLString(location_id)}'`;
-			}
+		if (location_id) {
+			query += ` AND location_id = '${escapeSQLString(location_id)}'`;
+		}
 
-			query += " GROUP BY platform, location_id";
-			query += " ORDER BY platform, location_id";
+		query += `
+        GROUP BY platform, location_id
+      )
+      SELECT
+        m.platform,
+        m.location_id,
+        AVG(m.round_trip_time) as mean_rtt,
+        approx_percentile_cont(m.round_trip_time, 0.5) as median_rtt,
+        approx_percentile_cont(m.round_trip_time, 0.5) as p50_rtt,
+        approx_percentile_cont(m.round_trip_time, 0.95) as p95_rtt,
+        approx_percentile_cont(m.round_trip_time, 0.99) as p99_rtt,
+        MIN(m.round_trip_time) as min_rtt,
+        MAX(m.round_trip_time) as max_rtt,
+        STDDEV(m.round_trip_time) as std_dev_rtt,
+        AVG(rj.run_jitter_value) as jitter,
+        rs.avg_packet_loss as packet_loss_rate,
+        rs.total_messages_sum as total_messages,
+        rs.successful_messages_sum as successful_messages,
+        rs.failed_messages_sum as failed_messages,
+        COUNT(*) as sample_count,
+        MAX(m.time) as time_period
+      FROM latency_measurements m
+      LEFT JOIN run_jitter rj ON m.run_id = rj.run_id AND m.platform = rj.platform AND m.location_id = rj.location_id
+      LEFT JOIN run_stats rs ON m.platform = rs.platform AND m.location_id = rs.location_id
+      WHERE m.time >= now() - INTERVAL '${Number(hours_ago)} hours'
+        AND m.round_trip_time IS NOT NULL
+    `;
 
-			try {
-				const records = await this.client.query(query, this.database, {
-					type: "sql",
-				});
+		// Add optional filters again for main query
+		if (platform) {
+			query += ` AND m.platform = '${escapeSQLString(platform)}'`;
+		}
 
-				for await (const record of records) {
+		if (location_id) {
+			query += ` AND m.location_id = '${escapeSQLString(location_id)}'`;
+		}
+
+		query +=
+			" GROUP BY m.platform, m.location_id, rs.avg_packet_loss, rs.total_messages_sum, rs.successful_messages_sum, rs.failed_messages_sum";
+		query += " ORDER BY m.platform, m.location_id";
+
+		const results: AggregatedMetric[] = [];
+
+		try {
+			const records = await this.client.query(query, this.database, {
+				type: "sql",
+			});
+
+			// Process each platform/location combination
+			for await (const record of records) {
+				const platform_val = String(record.platform || "unknown");
+				const location_val = String(record.location_id || "unknown");
+				const time_period = String(record.time_period || "");
+				const sample_count = Number.parseInt(
+					String(record.sample_count || "0"),
+					10,
+				);
+
+				// Create separate result entries for each metric
+				const metrics = [
+					{
+						name: "mean_rtt",
+						avg: Number(record.mean_rtt) || 0,
+						min: Number(record.mean_rtt) || 0,
+						max: Number(record.mean_rtt) || 0,
+					},
+					{
+						name: "median_rtt",
+						avg: Number(record.median_rtt) || 0,
+						min: Number(record.median_rtt) || 0,
+						max: Number(record.median_rtt) || 0,
+					},
+					{
+						name: "p50_rtt",
+						avg: Number(record.p50_rtt) || 0,
+						min: Number(record.p50_rtt) || 0,
+						max: Number(record.p50_rtt) || 0,
+					},
+					{
+						name: "p95_rtt",
+						avg: Number(record.p95_rtt) || 0,
+						min: Number(record.p95_rtt) || 0,
+						max: Number(record.p95_rtt) || 0,
+					},
+					{
+						name: "p99_rtt",
+						avg: Number(record.p99_rtt) || 0,
+						min: Number(record.p99_rtt) || 0,
+						max: Number(record.p99_rtt) || 0,
+					},
+					{
+						name: "min_rtt",
+						avg: Number(record.min_rtt) || 0,
+						min: Number(record.min_rtt) || 0,
+						max: Number(record.min_rtt) || 0,
+					},
+					{
+						name: "max_rtt",
+						avg: Number(record.max_rtt) || 0,
+						min: Number(record.max_rtt) || 0,
+						max: Number(record.max_rtt) || 0,
+					},
+					{
+						name: "std_dev_rtt",
+						avg: Number(record.std_dev_rtt) || 0,
+						min: Number(record.std_dev_rtt) || 0,
+						max: Number(record.std_dev_rtt) || 0,
+					},
+					{
+						name: "jitter",
+						avg: Number(record.jitter) || 0,
+						min: Number(record.jitter) || 0,
+						max: Number(record.jitter) || 0,
+					},
+					{
+						name: "packet_loss_rate",
+						avg: Number(record.packet_loss_rate) || 0,
+						min: Number(record.packet_loss_rate) || 0,
+						max: Number(record.packet_loss_rate) || 0,
+					},
+					{
+						name: "total_messages",
+						avg: Number(record.total_messages) || 0,
+						min: Number(record.total_messages) || 0,
+						max: Number(record.total_messages) || 0,
+					},
+					{
+						name: "successful_messages",
+						avg: Number(record.successful_messages) || 0,
+						min: Number(record.successful_messages) || 0,
+						max: Number(record.successful_messages) || 0,
+					},
+					{
+						name: "failed_messages",
+						avg: Number(record.failed_messages) || 0,
+						min: Number(record.failed_messages) || 0,
+						max: Number(record.failed_messages) || 0,
+					},
+				];
+
+				for (const metric of metrics) {
 					results.push({
-						platform: String(record.platform || "unknown"),
-						location_id: String(record.location_id || "unknown"),
-						metric_name: metric,
-						avg_value: Number(record.avg_value) || 0,
-						min_value: Number(record.min_value) || 0,
-						max_value: Number(record.max_value) || 0,
-						sample_count: Number.parseInt(
-							String(record.sample_count || "0"),
-							10,
-						),
-						time_period: String(record.time_period || ""),
+						platform: platform_val,
+						location_id: location_val,
+						metric_name: metric.name,
+						avg_value: metric.avg,
+						min_value: metric.min,
+						max_value: metric.max,
+						sample_count: sample_count,
+						time_period: time_period,
 					});
 				}
-			} catch (error) {
-				console.error(`Failed to query aggregated stats for ${metric}:`, error);
 			}
+		} catch (error) {
+			console.error("Failed to query aggregated stats:", error);
+		}
 
-			return results;
-		};
-
-		// Run all metric queries in parallel
-		const allResults = await Promise.all(metrics.map((m) => queryMetric(m)));
-
-		// Flatten results from all queries
-		return allResults.flat();
+		return results;
 	}
 
 	/**
 	 * Query time-series data for charting.
+	 * Returns raw round_trip_time measurements over time.
 	 * Parameters are validated to prevent SQL injection.
 	 */
 	async queryTimeSeries(params: {
@@ -179,17 +292,18 @@ export class InfluxDBClientWrapper {
 			throw new Error(`Invalid metric name: ${metric_name}`);
 		}
 
-		const safeMetric = validateSQLIdentifier(metric_name);
-
+		// For time series, we aggregate measurements by run_id
+		// Each data point represents the average of ~100 pings from a single benchmark run
 		let query = `
       SELECT
         platform,
         location_id,
-        ${safeMetric} as value,
-        time as timestamp
+        run_id,
+        AVG(round_trip_time) as value,
+        MAX(time) as timestamp
       FROM latency_measurements
       WHERE time >= now() - INTERVAL '${Number(hours_ago)} hours'
-        AND ${safeMetric} IS NOT NULL
+        AND round_trip_time IS NOT NULL
     `;
 
 		// Add optional filters with escaped values
@@ -201,7 +315,8 @@ export class InfluxDBClientWrapper {
 			query += ` AND location_id = '${escapeSQLString(location_id)}'`;
 		}
 
-		query += " ORDER BY time DESC LIMIT 1000";
+		query += " GROUP BY run_id, platform, location_id";
+		query += " ORDER BY timestamp DESC LIMIT 1000";
 
 		const results: TimeSeriesDataPoint[] = [];
 
@@ -256,63 +371,11 @@ export class InfluxDBClientWrapper {
 
 	/**
 	 * Get latest statistics for all locations and platforms.
-	 * Uses validated metrics to prevent SQL injection.
+	 * Calculates statistics from recent raw measurements.
 	 */
 	async getLatestStats(): Promise<AggregatedMetric[]> {
-		const metrics: readonly MetricName[] = [
-			"mean_rtt",
-			"p95_rtt",
-			"p99_rtt",
-			"jitter",
-			"packet_loss_rate",
-		];
-
-		const results: AggregatedMetric[] = [];
-
-		for (const metric of metrics) {
-			// Validate metric name against allowlist
-			const safeMetric = validateSQLIdentifier(metric);
-
-			const query = `
-        SELECT
-          platform,
-          location_id,
-          '${escapeSQLString(metric)}' as metric_name,
-          ${safeMetric} as avg_value,
-          ${safeMetric} as min_value,
-          ${safeMetric} as max_value,
-          1 as sample_count,
-          time as time_period
-        FROM latency_measurements
-        WHERE time >= now() - INTERVAL '1 hour'
-          AND ${safeMetric} IS NOT NULL
-        ORDER BY time DESC
-        LIMIT 100
-      `;
-
-			try {
-				const records = await this.client.query(query, this.database, {
-					type: "sql",
-				});
-
-				for await (const record of records) {
-					results.push({
-						platform: String(record.platform || "unknown"),
-						location_id: String(record.location_id || "unknown"),
-						metric_name: metric,
-						avg_value: Number(record.avg_value) || 0,
-						min_value: Number(record.min_value) || 0,
-						max_value: Number(record.max_value) || 0,
-						sample_count: 1,
-						time_period: String(record.time_period || ""),
-					});
-				}
-			} catch (error) {
-				console.error(`Failed to query latest stats for ${metric}:`, error);
-			}
-		}
-
-		return results;
+		// Calculate stats from the most recent hour of data
+		return this.queryAggregatedStats({ hours_ago: 1 });
 	}
 
 	/**

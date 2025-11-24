@@ -23,4 +23,4 @@ Comprehensive test for InfluxDB (Amazon Timestream for InfluxDB 3) connection an
 **Requirements:**
 - `.env` file with proper InfluxDB credentials
 - Network access to InfluxDB instance
-- Security group configured to allow inbound traffic on port 8181
+- Security group configured to allow inbound traffic on the InfluxDB port (check your AWS instance settings)
